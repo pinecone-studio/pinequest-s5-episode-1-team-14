@@ -31,17 +31,24 @@ async function main() {
   const ai = new GoogleGenAI({ apiKey });
   let turnsLeft = TEST_MESSAGES.length;
 
+  // NOTE: as of 2026 the native-audio Live models (incl. gemini-3.8-live)
+  // reject responseModalities: [TEXT] outright ("combination of response
+  // modalities (TEXT) is not supported by the model"). Workaround: request
+  // AUDIO (required) but turn on outputAudioTranscription and read the text
+  // from there — we discard the audio bytes since ElevenLabs does our TTS.
   const session = await ai.live.connect({
     model: MODEL,
     config: {
-      responseModalities: [Modality.TEXT],
+      responseModalities: [Modality.AUDIO],
+      outputAudioTranscription: {},
       systemInstruction: SYSTEM_INSTRUCTION,
     },
     callbacks: {
       onopen: () => console.log("--- Холбогдлоо ---\n"),
       onmessage: (message) => {
-        if (message.text) {
-          process.stdout.write(message.text);
+        const text = message.serverContent?.outputTranscription?.text;
+        if (text) {
+          process.stdout.write(text);
         }
         if (message.serverContent?.turnComplete) {
           console.log("\n");
