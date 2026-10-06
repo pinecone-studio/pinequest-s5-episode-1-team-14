@@ -1,0 +1,15 @@
+{
+  "name": "pinequest-s5-episode-1-team-14",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "pwa"
+  ],
+  "scripts": {
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:pwa": "npm run dev --workspace=pwa",
+    "build:backend": "npm run build --workspace=backend",
+    "build:pwa": "npm run build --workspace=pwa",
+    "lint": "npm run lint --workspace=backend && npm run lint --workspace=pwa"
+  }
+}
