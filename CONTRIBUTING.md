@@ -3,10 +3,10 @@
 ## Branch rules
 
 - `main` is protected: no direct pushes, every change lands through a PR.
-- Branch off `main` for every task, name it `<type>/<short-task>`:
-  - `feature/twilio-media-stream`
-  - `feature/elevenlabs-clone`
-  - `feature/rag-knowledge`
+- Pull the latest `main`, then create a new branch for every task, named `<type>/<short-task>`:
+  - `feat/twilio-media-stream`
+  - `feat/elevenlabs-tts`
+  - `feat/rag-knowledge`
   - `fix/<bug-name>`
   - `chore/<task-name>`
 - One branch = one task = one PR. Don't bundle unrelated changes.
@@ -22,16 +22,20 @@
 
 ## Commits
 
-- Commit message: short imperative summary (`add twilio media stream handler`,
-  not `fixed stuff` or `wip`).
+- Use Conventional Commits, for example `feat(telephony): add media stream handler`
+  or `docs(readme): document local setup`.
 - Rebase/squash locally before opening the PR if you made a lot of small
   checkpoint commits — keep the PR's commit history readable.
 
 ## Opening a PR
 
-- Fill in the PR template (what changed, why, how you tested it).
+- Open the PR against `main` and fill in the template (what changed, why,
+  changes, validation, relevant screenshots/logs, and limitations).
 - Link the relevant TDD section or issue.
-- Request a review from the other backend/frontend owner before merging.
+- Stop after opening the PR and wait for at least one human approval.
+- Do not automatically approve or merge your own PR.
+- After a human-approved merge, switch to `main`, pull latest, and create the
+  next task's branch. Do not stack unrelated work onto the open PR.
 - Delete the branch after merge.
 
 ## Before you push
