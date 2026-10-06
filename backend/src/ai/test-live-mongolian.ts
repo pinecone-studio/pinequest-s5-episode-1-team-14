@@ -1,10 +1,6 @@
-// Day 1-2 task: sanity-check Gemini Live API's Mongolian quality before
-// building anything on top of it. Text-in/text-out only (no audio yet) —
-// this is the cheapest way to see if the model understands and writes
-// natural Mongolian before we add Twilio/audio plumbing on top.
-//
-// Usage: npm run test:gemini-mn   (from backend/)
-// Requires GEMINI_API_KEY in backend/.env (copy backend/.env.example).
+// Day 1-2: Gemini Live API-ийн монгол хэлний чанарыг шалгах тест.
+// Ажиллуулах: npm run test:gemini-mn (backend/-ээс)
+// GEMINI_API_KEY-г backend/.env-д оруулсан байх шаардлагатай.
 
 import "dotenv/config";
 import { GoogleGenAI, Modality } from "@google/genai";
@@ -31,11 +27,7 @@ async function main() {
   const ai = new GoogleGenAI({ apiKey });
   let turnsLeft = TEST_MESSAGES.length;
 
-  // NOTE: as of 2026 the native-audio Live models (incl. gemini-3.8-live)
-  // reject responseModalities: [TEXT] outright ("combination of response
-  // modalities (TEXT) is not supported by the model"). Workaround: request
-  // AUDIO (required) but turn on outputAudioTranscription and read the text
-  // from there — we discard the audio bytes since ElevenLabs does our TTS.
+  // gemini-3.8-live нь TEXT horim-ыг дэмждэггүй тул AUDIO + transcription-оор текст авна.
   const session = await ai.live.connect({
     model: MODEL,
     config: {
@@ -64,7 +56,7 @@ async function main() {
   for (const text of TEST_MESSAGES) {
     console.log(`Хэрэглэгч: ${text}`);
     session.sendRealtimeInput({ text });
-    // give the model time to finish each turn before sending the next
+    // дараагийн асуулт илгээхийн өмнө одоогийн turn дуусахыг хүлээнэ
     await new Promise((resolve) => setTimeout(resolve, 4000));
   }
 }
