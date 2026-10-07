@@ -1,6 +1,11 @@
 {
   "name": "pinequest-s5-episode-1-team-14",
   "private": true,
+  "packageManager": "npm@11.12.1",
+  "engines": {
+    "node": "24.x",
+    "npm": "11.x"
+  },
   "workspaces": [
     "backend",
     "pwa"
