@@ -2,7 +2,7 @@
 
 `/` redirects to `/dashboard`. The `(workspace)` route group shares the sidebar,
 header and content frame. Navigation labels are Mongolian. Future
-Bookings, Knowledge, Analytics, Demo and Settings sections are visibly disabled
+Knowledge, Analytics, Demo and Settings sections are visibly disabled
 until their own feature PRs add working routes.
 
 The overview currently shows empty metrics/activity and unknown connection
@@ -77,3 +77,36 @@ state and browser runtime errors. Demo mode refreshes these review screenshots:
 
 ![Desktop calls](docs/calls-desktop.png)
 ![Mobile calls](docs/calls-mobile.png)
+
+## Bookings
+
+`/bookings` lists customers, phone numbers, services, start times, durations,
+statuses and sources. Search by customer, formatted phone, service or booking ID,
+and combine the search with a day filter in `Asia/Ulaanbaatar`. All dates use the
+same formatter as Calls. Results are ordered by appointment start, earliest first.
+Expand a row for booking/service IDs, the Calendar event ID and the end time.
+
+`lib/bookings.ts` reuses the backend `Booking` type through a type-only import.
+The current contract supports only `confirmed` and `AI_PHONE_AGENT`; the UI does
+not invent cancellation or completion states. The page reuses the Calls table,
+filter and responsive styles without adding a UI dependency.
+
+The same `NEXT_PUBLIC_USE_MOCK_API=true` flag enables six explicitly labelled,
+synthetic bookings; otherwise the page shows a connection-pending empty state.
+These fixtures are not real Calendar events. There is no booking-list API or
+authentication yet, so no backend data or credentials are loaded into the page.
+Live listing and create/edit/cancel actions belong to a separate integration PR.
+
+With the temporary browser tooling and running app from the instructions above:
+
+```powershell
+$env:EXPECT_MOCK_BOOKINGS = 'true' # Match the build's mock flag; also check false.
+node pwa/scripts/check-bookings.cjs
+```
+
+The browser check covers sorting, search, combined local-day filtering across UTC
+midnight, reset/empty results, keyboard details/scrolling, mobile navigation and
+five viewport widths. Run the Calls check too when changing the shared formatter.
+
+![Desktop bookings](docs/bookings-desktop.png)
+![Mobile bookings](docs/bookings-mobile.png)
