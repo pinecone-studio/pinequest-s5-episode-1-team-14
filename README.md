@@ -30,6 +30,7 @@ backend/
     voice/elevenlabs.ts       TTS stub
     knowledge/rag.ts          knowledge lookup stub
     calendar/googleCalendar.ts availability checks and booking creation
+    calls/store.ts            persistent call lifecycle metadata
 pwa/
   package.json               Next.js 14 + React 18 + TypeScript
   app/layout.tsx             Mongolian document language and metadata
@@ -46,10 +47,10 @@ pwa/
 | APIs | No HTTP routes, Next.js API routes, or WebSocket server; `ws` is installed as a declared dependency but unused |
 | Gemini | Manual script loads `backend/.env`, connects with AUDIO output and transcription, then sends three Mongolian prompts |
 | Other integrations | Gemini wrapper, Twilio and ElevenLabs remain stubs; Calendar supports availability and booking creation, with no runtime callers yet (see [Calendar setup](backend/src/calendar/README.md)) |
-| Database/storage | Local JSON business knowledge and Google Calendar booking events; no database client or call/session storage |
+| Database/storage | Local JSON business knowledge and [call sessions](backend/src/calls/README.md), plus Google Calendar booking events; no database client |
 | Shared packages | None; add shared contracts only when a real frontend/backend integration needs them |
 | Environment | `backend/.env.example` exists; no frontend environment variables are currently read |
-| Testing | Offline Knowledge/RAG and Calendar tests plus the live Gemini script; strict backend typechecking runs through `build:backend` |
+| Testing | Offline Knowledge/RAG, Calendar and call storage tests plus the live Gemini script; strict backend typechecking runs through `build:backend` |
 
 The Gemini experiment hard-codes `gemini-3.8-live`; availability and access have
 not been verified. It spaces messages using a four-second delay rather than
@@ -125,7 +126,7 @@ Run root scripts from the repository root. Use `--workspace` for package scripts
 | Location | Existing scripts |
 | --- | --- |
 | Root | `dev:backend`, `dev:pwa`, `build:backend`, `build:pwa`, `lint` |
-| `backend` | `dev`, `build`, `start`, `lint`, `test:gemini-mn`, `test:knowledge`, `test:calendar` |
+| `backend` | `dev`, `build`, `start`, `lint`, `test:gemini-mn`, `test:knowledge`, `test:calendar`, `test:calls` |
 | `pwa` | `dev`, `build`, `start`, `lint` |
 
 ```bash
@@ -135,8 +136,8 @@ npm run build:pwa
 ```
 
 The backend build runs strict TypeScript checking and emits `backend/dist/`.
-The Next.js build includes frontend type checking. Neither package defines a
-separate `typecheck` or automated `test` script. Production `start` scripts
+The Next.js build includes frontend type checking. No standalone `typecheck`
+script is defined; offline checks use the `test:*` scripts above. Production `start` scripts
 require their corresponding build first; backend `start` still only prints
 the placeholder message and exits.
 
@@ -150,7 +151,8 @@ This makes real API requests and may consume provider quota; it is not an
 offline regression test or proof that the phone flow works. The hard-coded
 model must first be verified for the configured account.
 
-CI runs `npm ci`, lint, and both builds for PRs to `main`. It selects Node.js from
+CI runs `npm ci`, lint, offline Knowledge/RAG, Calendar and call storage tests,
+and both builds for PRs to `main`. It selects Node.js from
 `.nvmrc` and keys the npm cache from the root `package-lock.json`. Local checks
 should use that same runtime and locked install.
 
