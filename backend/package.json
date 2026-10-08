@@ -9,7 +9,7 @@
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",
     "test:gemini-mn": "tsx src/ai/test-live-mongolian.ts",
-    "test:knowledge": "tsx --test src/knowledge/store.test.ts"
+    "test:knowledge": "tsx --test src/knowledge/store.test.ts src/knowledge/rag.test.ts"
   },
   "dependencies": {
     "ws": "^8.18.0",
