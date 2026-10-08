@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AI Front-Desk — шүдний эмнэлгийн дуудлагын туслах</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="assets/js/tailwind.config.js"></script>
+<link rel="stylesheet" href="assets/css/styles.css">
+</head>
+<body class="m-0 bg-bg text-ink font-sans text-[17px] leading-relaxed">
+
+<div id="bg" aria-hidden="true"><canvas id="burst"></canvas></div>
+<div id="bar" aria-hidden="true" class="fixed top-0 left-0 w-full h-[3px] bg-accent z-50 origin-left" style="transform:scaleX(0)"></div>
+
+<div class="max-w-[1080px] mx-auto px-5">
+  <header class="sticky top-[env(safe-area-inset-top,0px)] z-10 bg-bg border-b border-line flex flex-wrap items-center justify-between gap-2 min-[761px]:gap-4 py-2.5 min-[761px]:py-3.5">
+    <div class="font-display font-bold text-[17px] tracking-tight">AI Front-Desk</div>
+    <nav aria-label="Үндсэн цэс" class="flex items-center gap-1.5 w-full min-[761px]:w-auto min-[761px]:ml-auto overflow-x-auto pb-0.5">
+      <a class="nav-l" href="#what">Боломжууд</a>
+      <a class="nav-l" href="#how">Хэрхэн ажилладаг</a>
+      <button type="button" class="nav-l cursor-pointer" data-open="b">Захиалга</button>
+      <button type="button" class="nav-l cursor-pointer" data-open="c">Дуудлагын түүх</button>
+      <a class="nav-l" href="#call">Залгаж үзэх</a>
+      <a class="nav-l" href="#clinics">Эмнэлгүүд</a>
+      <a class="nav-l" href="#safety">Аюулгүй байдал</a>
+      <button id="themeBtn" type="button" aria-label="Загвар солих" class="nav-l ml-auto min-[761px]:ml-0 cursor-pointer text-lg leading-none">◐</button>
+    </nav>
+  </header>
+
+  <main>
+    <div class="glow hero-stick grid md:grid-cols-2 gap-10 items-center pt-6 md:pt-12 pb-16 md:pb-[72px]">
+      <div>
+        <h1 class="font-display font-bold text-[clamp(27px,4.2vw,44px)] leading-[1.15] tracking-tight m-0 mb-5">Шүдний эмнэлгийн дуудлагад AI 24/7 монголоор хариулна</h1>
+        <p class="text-muted max-w-[46ch] m-0 mb-7">Хүлээн авагч завгүй, ажлын цаг дууссан үед ч дуудлага алдагдахгүй. AI үнэ, үйлчилгээ, цагийн хуваарийн асуултад хариулж, Google Calendar дээр сул цаг шалгаад үзлэгийн цагийг шууд захиална.</p>
+        <div class="flex flex-wrap gap-3">
+          <a class="btn" href="#how">Хэрхэн ажилладаг вэ</a>
+        </div>
+      </div>
+      <div id="chatbox" class="bg-con text-[#F2F4F8] rounded-[14px] p-[18px] text-sm font-medium leading-[1.65] min-h-[360px] border border-line" aria-label="Дуудлагын жишээ яриа">
+        <div class="flex justify-between text-[13px] text-[#B8BCC8] mb-3.5"><span class="flex items-center gap-2"><span class="flex items-center gap-0.5 h-3.5" aria-hidden="true"><i class="wv w-0.5 h-full bg-[var(--bubble)] rounded origin-center" style="animation:wave 1s ease-in-out infinite"></i><i class="wv w-0.5 h-full bg-[var(--bubble)] rounded origin-center" style="animation:wave 1s ease-in-out .15s infinite"></i><i class="wv w-0.5 h-full bg-[var(--bubble)] rounded origin-center" style="animation:wave 1s ease-in-out .3s infinite"></i><i class="wv w-0.5 h-full bg-[var(--bubble)] rounded origin-center" style="animation:wave 1s ease-in-out .45s infinite"></i></span>Ирж буй дуудлага</span><span id="clock">21:47</span></div>
+        <div id="chat"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+    <section id="what" class="sec">
+      <h2 class="h2">Эмнэлгийн өдөр тутмын дуудлагыг хариуцна</h2>
+      <div class="grid md:grid-cols-3 gap-7">
+        <div class="border-l-[3px] border-accent pl-4"><h3 class="m-0 mb-2 text-xl">Цаг захиалах</h3><p class="m-0 text-muted">Эмчийн сул цагийг Google Calendar-аас шалгаж, нэр, утасны дугаар, үйлчилгээг авч захиалгыг шууд үүсгэнэ.</p></div>
+        <div class="border-l-[3px] border-accent pl-4"><h3 class="m-0 mb-2 text-xl">Үнэ, үйлчилгээний асуулт</h3><p class="m-0 text-muted">Цэвэрлэгээ, ломбо, шүд авахуулах зэрэг үйлчилгээний үнэ, цагийн хуваарьт эмнэлгийн өөрийн мэдээллээс хариулна.</p></div>
+        <div class="border-l-[3px] border-accent pl-4"><h3 class="m-0 mb-2 text-xl">Хянах самбар</h3><p class="m-0 text-muted">Нийт дуудлага, хариулсан дуудлага, захиалга, хөрвөлтийг нэг самбараас хараарай.</p></div>
+      </div>
+    </section>
+
+    <section id="how" class="sec">
+      <h2 class="h2">Гурван алхмаар ажиллаж эхэлнэ</h2>
+      <ol class="list-none m-0 p-0 grid md:grid-cols-3 gap-5" id="steps"></ol>
+    </section>
+
+    <section id="call" class="sec">
+      <h2 class="h2">Утсаар залгаж AI-тай ярьж үзээрэй</h2>
+      <div class="flex flex-wrap items-center justify-between gap-7 bg-surface border border-line rounded-[14px] p-7">
+        <div>
+          <div id="demoNum" class="font-display font-bold text-[clamp(24px,4vw,36px)] tracking-tight mb-1.5">Демо дугаар удахгүй</div>
+          <p class="m-0 text-muted max-w-[42ch]">Залгаад цаг захиалах, үнэ асуух, ажлын цагийг асууж үзээрэй. AI монголоор хариулна.</p>
+        </div>
+        <a id="callBtn" href="#call" aria-disabled="true" class="btn aria-disabled:!bg-line aria-disabled:!text-muted aria-disabled:pointer-events-none">Залгах</a>
+      </div>
+    </section>
+
+    <section id="safety" class="sec">
+      <h2 class="h2">Эмнэлгийн нэр хүндийг хамгаална</h2>
+      <div class="bg-surface border border-line rounded-xl p-6 max-w-[70ch]">
+        <p class="m-0 text-muted">AI эмчилгээний онош, эмийн зөвлөгөө өгөхгүй. Үнэ, цаг, үйлчилгээний мэдээллийг зөвхөн эмнэлгийн оруулсан мэдээллээс хэлнэ. Мэдэхгүй зүйлийг зохиохгүй, хүн хүсвэл эсвэл итгэлтэй биш үед ажилтан руу шилжүүлнэ.</p>
+      </div>
+    </section>
+
+    <section id="clinics" class="sec">
+      <h2 class="h2">Хамтран ажиллаж буй эмнэлгүүд</h2>
+      <div id="clinicList" class="grid md:grid-cols-3 gap-5"></div>
+    </section>
+
+    <section id="start" class="sec text-center">
+      <h2 class="h2 !mx-auto !max-w-[20ch]">Өөрийн эмнэлгийн дугаар дээр демо сонсоорой</h2>
+      <p class="text-muted mx-auto mb-6 max-w-[44ch]">Бид 14 хоногийн турш хэд хэдэн эмнэлэгтэй хамтран туршиж байна.</p>
+    </section>
+    </div>
+  </main>
+
+  <footer class="panel pt-7 pb-10 text-sm text-muted border-t border-line">© 2026 AI Front-Desk Mongolia</footer>
+</div>
+
+<dialog id="hist" aria-labelledby="hTitle" class="m-auto w-[calc(100%-32px)] max-w-[780px] bg-surface text-ink border border-line rounded-2xl p-0 shadow-2xl">
+  <div class="p-5">
+    <div class="flex items-center justify-between gap-3 mb-4">
+      <h2 id="hTitle" class="m-0 font-display font-medium text-xl tracking-tight">Захиалга, дуудлагын түүх</h2>
+      <button id="hclose" type="button" aria-label="Хаах" class="cursor-pointer text-2xl leading-none px-2 text-muted hover:text-ink focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-accent rounded">×</button>
+    </div>
+    <div class="flex gap-2 mb-3.5" role="tablist">
+      <button class="tab" role="tab" id="tabB" aria-selected="true" type="button">Захиалгууд</button>
+      <button class="tab" role="tab" id="tabC" aria-selected="false" type="button">Дуудлагын түүх</button>
+    </div>
+    <div class="overflow-x-auto border border-line rounded-xl"><table id="tbl" class="w-full min-w-[520px] border-collapse text-[15px]"></table></div>
+    <p class="text-sm text-muted mt-3 mb-0">Жишээ өгөгдөл. Бодит самбар эмнэлгийн дуудлага, Calendar-аас шинэчлэгдэнэ.</p>
+  </div>
+</dialog>
+
+<style type="text/tailwindcss">
+@layer components{
+  .btn{@apply inline-block bg-accent text-accent-ink rounded-[10px] px-[22px] py-[13px] font-bold text-base cursor-pointer no-underline focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-accent focus-visible:outline-offset-[3px]}
+  .nav-l{@apply text-muted no-underline font-medium text-[15px] px-2.5 py-2 rounded-lg whitespace-nowrap hover:text-ink hover:bg-surface focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-accent}
+  .sec{@apply py-16 border-t border-line}
+  .h2{@apply font-display font-medium text-[clamp(22px,3vw,30px)] leading-tight tracking-tight m-0 mb-8 max-w-[26ch]}
+  .tab{@apply bg-transparent text-ink border border-line rounded-full px-4 py-2 font-bold text-[15px] cursor-pointer aria-selected:bg-ink aria-selected:text-bg aria-selected:border-ink focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-accent focus-visible:outline-offset-2}
+  .pill{@apply inline-block px-2.5 py-0.5 rounded-full text-[13px] font-bold border}
+  th{@apply text-left px-4 py-3 border-b border-line whitespace-nowrap text-muted font-medium text-sm}
+  td{@apply text-left px-4 py-3 border-b border-line whitespace-nowrap}
+  tr:last-child td{@apply border-b-0}
+}
+</style>
+
+<script src="assets/js/utils.js"></script>
+<script src="assets/js/config.js"></script>
+<script src="assets/js/data.js"></script>
+<script src="assets/js/sections.js"></script>
+<script src="assets/js/history.js"></script>
+<script src="assets/js/chat.js"></script>
+<script src="assets/js/background.js"></script>
+<script src="assets/js/page.js"></script>
+</body>
+</html>
