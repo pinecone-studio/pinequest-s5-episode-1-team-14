@@ -1,6 +1,12 @@
-# Dashboard shell
+# Landing page and dashboard
 
-`/` redirects to `/dashboard`. The `(workspace)` route group shares the sidebar,
+`/` serves the approved [PR #14 landing page](https://github.com/pinecone-studio/pinequest-s5-episode-1-team-14/pull/14).
+Its source lives in `public/landing/`; a Next.js rewrite serves the standalone
+HTML without sharing its global styles or scripts with the dashboard. The hero's
+dashboard link opens `/dashboard`. See [landing setup](docs/landing.md) for files,
+demo placeholders and external Tailwind CDN/Google Fonts requirements.
+
+`/dashboard` opens the dashboard. The `(workspace)` route group shares the sidebar,
 header and content frame. Navigation labels are Mongolian. Future
 Knowledge, Analytics, Demo and Settings sections are visibly disabled
 until their own feature PRs add working routes.
@@ -9,7 +15,7 @@ The overview currently shows empty metrics/activity and unknown connection
 states. It does not read backend data or imply that an integration is online.
 Keep actual data loading, authentication and remaining feature pages in separate PRs.
 
-Styles use plain CSS and local system fonts; no UI/font dependencies or external
+Dashboard styles use plain CSS and local system fonts; no UI/font dependencies or external
 asset requests are added. Small screens use a native `details` menu, while a
 skip link, focus indicators and active-page semantics support keyboard users.
 
@@ -21,7 +27,7 @@ npm run build:pwa
 npm run start --workspace=pwa -- --hostname 127.0.0.1 --port 3100
 ```
 
-Open `http://127.0.0.1:3100`. Check desktop and 320px mobile layouts; Tab/Enter
+Open `http://127.0.0.1:3100/dashboard`. Check desktop and 320px mobile layouts; Tab/Enter
 the skip link, open/close the mobile menu, and follow the connections anchor.
 Disabled future sections must not navigate to missing pages.
 
@@ -34,12 +40,17 @@ $browserCheckDir = Join-Path $env:TEMP 'codex-pr11-browser-check'
 npm.cmd install --prefix $browserCheckDir --no-package-lock --ignore-scripts --no-audit --no-fund playwright-core@1.64.0
 $env:NODE_PATH = Join-Path $browserCheckDir 'node_modules'
 node pwa/scripts/check-dashboard.cjs
+node pwa/scripts/check-landing.cjs
 ```
 
 `DASHBOARD_URL` optionally selects a different local server. The check verifies
-redirects, keyboard focus, menu behavior, five viewport widths and runtime
+direct dashboard access, keyboard focus, menu behavior, five viewport widths and runtime
 errors. It also refreshes the review screenshots in `pwa/docs/`. This optional
 browser check is separate from the existing CI lint/build checks.
+
+The landing check covers `/`, local assets, theme persistence, demo dialogs,
+anchor navigation, reduced motion, five widths and the link into the dashboard.
+Landing screenshots are also written to `pwa/docs/`.
 
 ![Desktop dashboard](docs/dashboard-desktop.png)
 ![Mobile dashboard](docs/dashboard-mobile.png)
