@@ -68,6 +68,30 @@ h2 { font-size: 16px; font-weight: 600; margin-top: 9px; letter-spacing: -.3px; 
 .connection-note { border-top: 1px solid #edf0ea; background: #fbfcf9; color: var(--muted); font-size: 10px; line-height: 1.6; padding: 12px 23px; }
 .page-footer { display: flex; justify-content: space-between; gap: 20px; margin-top: auto; padding: 16px 38px 21px; font-size: 10px; color: var(--muted); }
 #connections { scroll-margin-top: 24px; }
+.calls-notice { margin: -12px 0 22px; padding: 13px 16px; border: 1px solid #dddcc8; border-radius: 8px; background: #f7f6ea; color: #6e6541; font-size: 12px; line-height: 1.7; }
+.calls-timezone { color: var(--muted); font-size: 11px; text-align: right; }
+.calls-filters { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 15px; padding: 22px 23px 16px; }
+.calls-filters label { display: grid; gap: 8px; font-size: 11px; color: var(--muted); }
+.calls-search { flex: 1; min-width: 190px; }
+.calls-filters input, .calls-filters select { width: 100%; min-height: 42px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink); padding: 10px 12px; font: inherit; font-size: 13px; }
+.calls-filters select { min-width: 190px; }.calls-filters input::placeholder { color: var(--muted); }
+.calls-button { min-height: 38px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--accent); font-size: 11px; cursor: pointer; white-space: nowrap; }
+.calls-button:hover:not(:disabled) { background: #edf4e7; }.calls-button:disabled, .calls-filters :disabled { background: #f5f7f3; color: var(--muted); cursor: not-allowed; }
+.calls-filters .calls-button { min-height: 42px; }.empty-state .calls-button { margin-top: 18px; }
+.calls-count { padding: 0 23px 17px; font-size: 11px; color: var(--muted); }
+.calls-table-scroll { position: relative; overflow-x: auto; }.calls-table-scroll:focus-visible { outline-offset: -3px; }
+.calls-table { width: 100%; min-width: 940px; border-collapse: collapse; text-align: left; font-size: 12px; }
+.calls-table th, .calls-table td { padding: 18px 15px; border-top: 1px solid var(--line); }
+.calls-table th:first-child, .calls-table td:first-child { padding-left: 23px; }.calls-table td:last-child { padding-right: 23px; }
+.calls-table thead { background: #f8faf6; color: var(--muted); font-size: 10px; }.calls-table thead th { font-weight: 600; }
+.call-row th { font-weight: 400; }.call-row th strong { font-weight: 600; white-space: nowrap; }.call-row small { display: block; color: var(--muted); font-size: 10px; margin-top: 6px; }
+.call-row time { display: block; min-width: 118px; line-height: 1.7; font-variant-numeric: tabular-nums; }
+.call-row:hover { background: #fcfdfb; }.call-muted { color: var(--muted); }.call-booked { color: var(--accent); font-weight: 600; }
+.call-status { display: inline-block; border-radius: 5px; padding: 6px 8px; font-size: 10px; white-space: nowrap; }
+.call-status-active { color: #215b83; background: #edf4fb; }.call-status-completed { color: #24684f; background: #edf5ee; }
+.call-status-failed { color: #924335; background: #fbeeea; }.call-status-handed_off { color: #765b20; background: #f8f2df; }
+.calls-table .call-detail { padding-block: 20px; background: #f5f8f0; }.call-detail dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.call-detail dt { font-size: 10px; color: var(--muted); }.call-detail dd { margin: 7px 0 0; line-height: 1.6; overflow-wrap: anywhere; }
 @media (max-width: 1200px) {
   .workspace { grid-template-columns: 230px minmax(0, 1fr); }.sidebar { padding-inline: 14px; }
   .topbar { padding-inline: 25px; }.dashboard-content { padding: 30px 25px; }.page-footer { padding-inline: 25px; }
@@ -82,6 +106,8 @@ h2 { font-size: 16px; font-weight: 600; margin-top: 9px; letter-spacing: -.3px; 
   .page-footer { padding-inline: 20px; }.guide-link { font-size: 11px; }
 }
 @media (max-width: 520px) {
+  .calls-filters { padding-inline: 18px; gap: 13px; }.calls-filters label { width: 100%; }.calls-search { min-width: 0; }.calls-count { padding-inline: 18px; }
+  .calls-timezone { max-width: 115px; line-height: 1.6; }.calls-notice { margin-top: -7px; }
   .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }.metric-card dt { font-size: 11px; line-height: 1.5; min-height: 33px; }.metric-card dd { margin-top: 5px; font-size: 30px; }
   .connection-list { display: block; padding-inline: 18px; }.connection-list li:nth-last-child(2) { border-bottom: 1px solid #edf0ea; }
   .panel-heading { padding: 21px 18px 18px; }.connection-note { padding-inline: 18px; }.dashboard-grid { gap: 18px; }.page-description { font-size: 12px; }
