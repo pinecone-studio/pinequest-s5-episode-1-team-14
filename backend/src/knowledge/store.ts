@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
+import { readJsonArray, writeJsonArray } from "../storage/jsonFile.js";
 
 export const KNOWLEDGE_CATEGORIES = [
   "business_info", "opening_hours", "service", "product", "faq", "policy", "promotion",
@@ -52,35 +52,13 @@ export class BusinessKnowledgeStore {
   constructor(private readonly filePath = resolve(__dirname, "../../data/knowledge.json")) {}
 
   private read(): KnowledgeItem[] {
-    let json: string;
-    try {
-      json = readFileSync(this.filePath, "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-      throw error;
-    }
-    const data: unknown = JSON.parse(json);
-    if (!Array.isArray(data)) throw new TypeError("Knowledge store must contain an array");
     const ids = new Set<string>();
-    return (data as unknown[]).map((item) => {
+    return readJsonArray(this.filePath).map((item) => {
       validateItem(item);
       if (ids.has(item.id)) throw new TypeError("Duplicate knowledge item ID");
       ids.add(item.id);
       return item;
     });
-  }
-
-  private write(items: KnowledgeItem[]): void {
-    mkdirSync(dirname(this.filePath), { recursive: true });
-    const temporaryPath = `${this.filePath}.${randomUUID()}.tmp`;
-    try {
-      writeFileSync(temporaryPath, JSON.stringify(items, null, 2) + "\n", {
-        encoding: "utf8", flag: "wx", mode: 0o600,
-      });
-      renameSync(temporaryPath, this.filePath);
-    } finally {
-      rmSync(temporaryPath, { force: true });
-    }
   }
 
   list({ activeOnly = false }: { activeOnly?: boolean } = {}): KnowledgeItem[] {
@@ -108,7 +86,7 @@ export class BusinessKnowledgeStore {
     const index = items.findIndex((existing) => existing.id === item.id);
     if (index === -1) items.push(item);
     else items[index] = item;
-    this.write(items);
+    writeJsonArray(this.filePath, items);
     return item;
   }
 
@@ -116,7 +94,7 @@ export class BusinessKnowledgeStore {
     const items = this.read();
     const remaining = items.filter((item) => item.id !== id);
     if (remaining.length === items.length) return false;
-    this.write(remaining);
+    writeJsonArray(this.filePath, remaining);
     return true;
   }
 }
