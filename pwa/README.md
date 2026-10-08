@@ -2,7 +2,7 @@
 
 `/` redirects to `/dashboard`. The `(workspace)` route group shares the sidebar,
 header and content frame. Navigation labels are Mongolian. Future
-Knowledge, Analytics, Demo and Settings sections are visibly disabled
+Analytics, Demo and Settings sections are visibly disabled
 until their own feature PRs add working routes.
 
 The overview currently shows empty metrics/activity and unknown connection
@@ -110,3 +110,37 @@ five viewport widths. Run the Calls check too when changing the shared formatter
 
 ![Desktop bookings](docs/bookings-desktop.png)
 ![Mobile bookings](docs/bookings-mobile.png)
+
+## Knowledge
+
+`/knowledge` lists all seven backend knowledge categories with title, content,
+optional MNT price, approval state and the last update in Ulaanbaatar time.
+Search title/content/ID and combine category and approval filters. Newest updates
+appear first. The page reuses the backend `KnowledgeItem` through type-only imports.
+
+The existing `NEXT_PUBLIC_USE_MOCK_API=true` flag enables seven centralized,
+synthetic records and page-local create/edit/delete controls. The notice and save
+feedback explain that edits disappear on reload/navigation and do not affect the
+real AI knowledge store. With the flag off, the page shows a connection-pending
+state and disables editing. No API, backend file or browser storage is accessed.
+
+New records and edits start as drafts. Approval requires an explicit checkbox;
+changing title, category, content or price clears that approval. Blank/whitespace
+text and invalid or negative prices are rejected; zero is valid and an empty price
+removes it. Delete asks for confirmation. Forms focus the title on opening and
+return focus to the list heading on save/cancel. Live persistent CRUD must use an
+authenticated, authorized management API in the integration work.
+
+With the optional browser tooling and running app described above:
+
+```powershell
+$env:EXPECT_MOCK_KNOWLEDGE = 'true' # Match the build flag; also check false.
+node pwa/scripts/check-knowledge.cjs
+```
+
+This checks combined filters, draft/approval behavior, create/edit/delete and
+cancel paths, price validation, focus, reload reset, five widths and navigation.
+
+![Desktop knowledge](docs/knowledge-desktop.png)
+![Mobile knowledge](docs/knowledge-mobile.png)
+![Knowledge editor](docs/knowledge-editor.png)
