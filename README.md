@@ -9,12 +9,15 @@ with one manual Gemini Live experiment; a working phone agent is not implemented
 
 ## Repository audit
 
-Audited base: `main` at `a16b0d0` (2026-10-06). The fresh checkout was clean and
-matched `origin/main`. The official repository is
+Initial audited base: `main` at `a16b0d0` (2026-10-06). The fresh checkout was clean
+and matched `origin/main`. Setup details below include the dependency/CI follow-up.
+The official repository is
 `pinecone-studio/pinequest-s5-episode-1-team-14`.
 
 ```text
 package.json                 npm workspaces: backend, pwa
+package-lock.json            locked dependencies for both workspaces
+.nvmrc                       exact Node.js version used locally and in CI
 .github/workflows/ci.yml      PR lint/build checks targeting main
 backend/
   .env.example               server-side environment template
@@ -37,7 +40,7 @@ pwa/
 
 | Area | What exists now |
 | --- | --- |
-| Package manager | npm, declared root workspaces `backend` and `pwa`; no committed lockfile or `packageManager` field at the audited base |
+| Package manager | npm 11.12.1, declared root workspaces `backend` and `pwa`, one committed root lockfile |
 | Frontend | Next.js App Router scaffold; no dashboard, API client, mock adapter, Tailwind configuration, or browser call UI |
 | Backend | Strict TypeScript; entry point only logs, even though its message says “listening” |
 | APIs | No HTTP routes, Next.js API routes, or WebSocket server; `ws` is installed as a declared dependency but unused |
@@ -57,27 +60,34 @@ in the Gemini PRs before using the experiment in a real call.
 
 ## Local setup
 
-Use Node.js and npm. CI currently selects Node.js 20; it is the repository's
-existing configuration, not a pinned local toolchain. The dependency/CI PR
-below will establish a supported, reproducible runtime and install baseline.
+Use [Node.js **24.15.0**](https://nodejs.org/en/download/archive/v24.15.0) with its
+bundled npm **11.12.1**. The exact Node.js version is in `.nvmrc`; CI reads that
+same file. `package.json` declares npm 11.12.1 and
+the compatible Node.js 24 / npm 11 major versions. If you use nvm, run
+`nvm install 24.15.0` and `nvm use 24.15.0`; otherwise install the version in `.nvmrc`
+with your usual Node.js installer. Check `node --version` and `npm --version`
+before installing dependencies.
 
 From the repository root:
 
 ```bash
-npm install
+npm ci
 cp backend/.env.example backend/.env
 ```
 
 PowerShell equivalent (use `npm.cmd` if execution policy blocks `npm.ps1`):
 
 ```powershell
-npm.cmd install
+npm.cmd ci
 Copy-Item backend/.env.example backend/.env
 ```
 
 Copy the template only for a new checkout; preserve an existing local `.env`.
-The audited base has no lockfile, so `npm ci` is not available yet and `npm install`
-will generate a root `package-lock.json`. Dependency locking belongs to the next PR.
+Run [`npm ci`](https://docs.npmjs.com/cli/v11/commands/npm-ci/) from the root to
+install both workspaces from `package-lock.json`. It replaces installed
+dependencies and fails if a manifest disagrees with the
+lockfile. Use `npm install` only when intentionally changing dependencies, and
+commit the updated manifest and root lockfile together in that feature's PR.
 
 Run these in separate terminals from the root:
 
@@ -140,14 +150,14 @@ This makes real API requests and may consume provider quota; it is not an
 offline regression test or proof that the phone flow works. The hard-coded
 model must first be verified for the configured account.
 
-CI runs lint and both builds for PRs to `main`. At the audited base,
-`actions/setup-node` requests npm caching without a committed lockfile; this
-is an existing CI setup gap. Fix the lockfile and installation step together
-in the dedicated dependency/CI PR, without mixing product features into it.
+CI runs `npm ci`, lint, and both builds for PRs to `main`. It selects Node.js from
+`.nvmrc` and keys the npm cache from the root `package-lock.json`. Local checks
+should use that same runtime and locked install.
 
 ## Proposed small PR sequence
 
-Each row is one branch and one PR. Only row 1 is in scope for the audit PR.
+Each row is one branch and one PR. The audit (row 1) is merged; the dependency/CI
+follow-up covers only row 2.
 Implement each later row after the preceding dependency has been approved,
 merged, and pulled from `main`. This sequence reuses the existing scaffolds
 and experiment; it does not import another repository.
