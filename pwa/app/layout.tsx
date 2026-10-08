@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
+import "./globals.css";
 
 export const metadata: Metadata = {
   title: "AI Front-Desk Mongolia",
-  description: "Backup web channel + dashboard for the AI front-desk agent",
+  description: "Дуудлага, захиалга, бизнесийн мэдээллээ нэг дороос удирдаарай.",
 };
 
 export default function RootLayout({
