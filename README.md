@@ -29,7 +29,7 @@ backend/
     telephony/twilio.ts       media stream stub
     voice/elevenlabs.ts       TTS stub
     knowledge/rag.ts          knowledge lookup stub
-    calendar/googleCalendar.ts booking stub
+    calendar/googleCalendar.ts availability checks and booking creation
 pwa/
   package.json               Next.js 14 + React 18 + TypeScript
   app/layout.tsx             Mongolian document language and metadata
@@ -45,11 +45,11 @@ pwa/
 | Backend | Strict TypeScript; entry point only logs, even though its message says “listening” |
 | APIs | No HTTP routes, Next.js API routes, or WebSocket server; `ws` is installed as a declared dependency but unused |
 | Gemini | Manual script loads `backend/.env`, connects with AUDIO output and transcription, then sends three Mongolian prompts |
-| Other integrations | Gemini wrapper, Twilio, ElevenLabs, RAG, and Calendar exports throw `not implemented`; no runtime callers |
-| Database/storage | None: no database client, schema, migrations, call records, or booking persistence |
+| Other integrations | Gemini wrapper, Twilio and ElevenLabs remain stubs; Calendar supports availability and booking creation, with no runtime callers yet (see [Calendar setup](backend/src/calendar/README.md)) |
+| Database/storage | Local JSON business knowledge and Google Calendar booking events; no database client or call/session storage |
 | Shared packages | None; add shared contracts only when a real frontend/backend integration needs them |
 | Environment | `backend/.env.example` exists; no frontend environment variables are currently read |
-| Testing | One live Gemini script; no automated test suite or dedicated `typecheck` script |
+| Testing | Offline Knowledge/RAG and Calendar tests plus the live Gemini script; strict backend typechecking runs through `build:backend` |
 
 The Gemini experiment hard-codes `gemini-3.8-live`; availability and access have
 not been verified. It spaces messages using a four-second delay rather than
@@ -110,7 +110,7 @@ Backend scripts use `dotenv/config`. The root workspace scripts run in
 | `GEMINI_API_KEY` | Required only for the manual Gemini experiment |
 | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` | Reserved for the TTS integration; unused today |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` | Reserved for telephony; unused today |
-| `GOOGLE_CALENDAR_CLIENT_EMAIL`, `GOOGLE_CALENDAR_PRIVATE_KEY`, `GOOGLE_CALENDAR_ID` | Reserved for Calendar; unused today |
+| `GOOGLE_CALENDAR_CLIENT_EMAIL`, `GOOGLE_CALENDAR_PRIVATE_KEY`, `GOOGLE_CALENDAR_ID` | Required for Calendar availability and booking; booking needs writer access to the shared calendar ([setup](backend/src/calendar/README.md)) |
 
 No credentials are required for the scaffold's lint/build or frontend page.
 Keep real values in ignored local env files. Only `.env.example` templates with
@@ -125,7 +125,7 @@ Run root scripts from the repository root. Use `--workspace` for package scripts
 | Location | Existing scripts |
 | --- | --- |
 | Root | `dev:backend`, `dev:pwa`, `build:backend`, `build:pwa`, `lint` |
-| `backend` | `dev`, `build`, `start`, `lint`, `test:gemini-mn` |
+| `backend` | `dev`, `build`, `start`, `lint`, `test:gemini-mn`, `test:knowledge`, `test:calendar` |
 | `pwa` | `dev`, `build`, `start`, `lint` |
 
 ```bash

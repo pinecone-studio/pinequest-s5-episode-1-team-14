@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { JWT } from "google-auth-library";
 
 export const CALENDAR_TIME_ZONE = "Asia/Ulaanbaatar";
@@ -12,7 +13,8 @@ const clock = new Intl.DateTimeFormat("en-CA", {
   timeZone: CALENDAR_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit",
   hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "longOffset",
 });
-let calendarAuth: JWT | undefined;
+const calendarClients = new Map<string, JWT>();
+let bookingQueue = Promise.resolve();
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -53,15 +55,35 @@ function providerTime(value: unknown): number {
   if (typeof value !== "string" ||
       !/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.test(value) ||
       !validDate(value.slice(0, 10)) || !Number.isFinite(Date.parse(value))) {
-    throw new TypeError("Invalid timestamp in Google Calendar response");
+    throw new TypeError("Calendar timestamp must be a valid RFC3339 timestamp with an offset");
   }
   return Date.parse(value);
 }
 
 function requiredEnv(name: string): string {
   const value = process.env[name]?.trim();
-  if (!value) throw new Error(`${name} is required for Google Calendar availability`);
+  if (!value) throw new Error(`${name} is required for Google Calendar`);
   return value;
+}
+
+function serviceDuration(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 1440) {
+    throw new RangeError("Service duration must be an integer from 1 to 1440 minutes");
+  }
+  return value;
+}
+
+function calendarClient(write = false): { auth: JWT; calendarId: string } {
+  const email = requiredEnv("GOOGLE_CALENDAR_CLIENT_EMAIL");
+  const key = requiredEnv("GOOGLE_CALENDAR_PRIVATE_KEY").replace(/\\n/g, "\n");
+  const calendarId = requiredEnv("GOOGLE_CALENDAR_ID");
+  const scope = `https://www.googleapis.com/auth/calendar.events${write ? "" : ".freebusy"}`;
+  let auth = calendarClients.get(scope);
+  if (!auth || auth.email !== email || auth.key !== key) {
+    auth = new JWT({ email, key, scopes: [scope], transporterOptions: { timeout: 10000, retry: false } });
+    calendarClients.set(scope, auth);
+  }
+  return { auth, calendarId };
 }
 
 export async function checkAvailability(input: AvailabilityRequest): Promise<{
@@ -73,24 +95,12 @@ export async function checkAvailability(input: AvailabilityRequest): Promise<{
   const range = record(request.timeRange);
   const start = localTime(request.date, range.start);
   const end = localTime(request.date, range.end);
-  const duration = request.durationMinutes;
+  const duration = serviceDuration(request.durationMinutes);
   if (end <= start) throw new RangeError("Calendar time range must end after it starts on the same date");
-  if (typeof duration !== "number" || !Number.isInteger(duration) || duration < 1 || duration > 1440) {
-    throw new RangeError("Service duration must be an integer from 1 to 1440 minutes");
-  }
-
-  const email = requiredEnv("GOOGLE_CALENDAR_CLIENT_EMAIL");
-  const key = requiredEnv("GOOGLE_CALENDAR_PRIVATE_KEY").replace(/\\n/g, "\n");
-  const calendarId = requiredEnv("GOOGLE_CALENDAR_ID");
-  if (!calendarAuth || calendarAuth.email !== email || calendarAuth.key !== key) {
-    calendarAuth = new JWT({
-      email, key, scopes: ["https://www.googleapis.com/auth/calendar.events.freebusy"],
-      transporterOptions: { timeout: 10000, retry: false },
-    });
-  }
+  const { auth, calendarId } = calendarClient();
   let data: unknown;
   try {
-    const response = await calendarAuth.request<unknown>({
+    const response = await auth.request<unknown>({
       url: "https://www.googleapis.com/calendar/v3/freeBusy", method: "POST",
       timeout: 10000, retry: false,
       data: {
@@ -134,6 +144,111 @@ export async function checkAvailability(input: AvailabilityRequest): Promise<{
   return { timeZone: CALENDAR_TIME_ZONE, slots };
 }
 
-export function bookAppointment(): void {
-  throw new Error("not implemented");
+export type AppointmentRequest = {
+  requestId: string;
+  customerName: string;
+  phone: string;
+  serviceId: string;
+  serviceName: string;
+  startTime: string;
+  durationMinutes: number;
+};
+export type Booking = Omit<AppointmentRequest, "requestId"> & {
+  id: string;
+  calendarEventId: string;
+  endTime: string;
+  status: "confirmed";
+  source: "AI_PHONE_AGENT";
+};
+
+function bookingText(value: unknown, field: string): string {
+  if (typeof value !== "string" || !value.trim() || value.length > 200 || /[\p{Cc}]/u.test(value)) {
+    throw new TypeError(`${field} must be non-empty text, at most 200 characters, without control characters`);
+  }
+  return value.trim();
+}
+
+export async function createAppointment(input: AppointmentRequest): Promise<Booking> {
+  const request = record(input);
+  const requestId = bookingText(request.requestId, "requestId");
+  const properties = {
+    source: "AI_PHONE_AGENT" as const,
+    customerName: bookingText(request.customerName, "customerName"),
+    phone: bookingText(request.phone, "phone"),
+    serviceId: bookingText(request.serviceId, "serviceId"),
+    serviceName: bookingText(request.serviceName, "serviceName"),
+  };
+  if (!/^(?:\d{8}|\+[1-9]\d{7,14})$/.test(properties.phone)) {
+    throw new TypeError("phone must be 8 local digits or an international number with + and 8-15 digits");
+  }
+  const durationMinutes = serviceDuration(request.durationMinutes);
+  const start = providerTime(request.startTime);
+  if (start % 60000 !== 0) throw new RangeError("Appointment start must align to a whole minute");
+  const end = start + durationMinutes * 60000;
+  const from = localParts(start);
+  const to = localParts(end);
+  const date = `${from.year}-${from.month}-${from.day}`;
+  if (date !== `${to.year}-${to.month}-${to.day}`) throw new RangeError("Appointment must end on the same local date");
+  const timeRange = { start: `${from.hour}:${from.minute}`, end: `${to.hour}:${to.minute}` };
+  // Reuse availability's validation, including historical ambiguous local times.
+  if (localTime(date, timeRange.start) !== start || localTime(date, timeRange.end) !== end) {
+    throw new RangeError("Invalid appointment time range");
+  }
+  const id = createHash("sha256").update(requestId).digest("hex");
+  const booking: Booking = {
+    ...properties, id, calendarEventId: id, startTime: new Date(start).toISOString(),
+    endTime: new Date(end).toISOString(), durationMinutes, status: "confirmed",
+  };
+  const { auth, calendarId } = calendarClient(true);
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
+  const verify = (value: unknown): Booking => {
+    const event = record(value);
+    const metadata = record(record(event.extendedProperties).private);
+    if (event.id !== id || event.status !== "confirmed" || event.transparency === "transparent" ||
+        providerTime(record(event.start).dateTime) !== start || providerTime(record(event.end).dateTime) !== end ||
+        Object.entries(properties).some(([key, value]) => metadata[key] !== value)) {
+      throw new Error("Calendar event does not match the confirmed booking request; verify it manually");
+    }
+    return booking;
+  };
+  const existing = async (): Promise<{ data: unknown } | undefined> => {
+    try {
+      return await auth.request<unknown>({ url: `${url}/${id}`, method: "GET", timeout: 10000, retry: false });
+    } catch (error) {
+      if ((error as { response?: { status?: number } } | null)?.response?.status === 404) return undefined;
+      throw new Error("Google Calendar booking lookup failed");
+    }
+  };
+  // ponytail: serialize one backend process; multiple replicas need a shared lock.
+  // External Calendar writers can still race Google's non-atomic check/insert.
+  const result = bookingQueue.then(async () => {
+    const previous = await existing();
+    if (previous !== undefined) return verify(previous.data);
+    const available = await checkAvailability({ date, timeRange, durationMinutes });
+    if (!available.slots.some((slot) => slot.startTime === booking.startTime && slot.endTime === booking.endTime) ||
+        start <= Date.now()) throw new Error("Appointment time is unavailable or in the past");
+    let event: unknown;
+    try {
+      event = (await auth.request<unknown>({
+        url, method: "POST", timeout: 10000, retry: false,
+        data: {
+          id, summary: `${properties.serviceName} - ${properties.customerName}`, description: `Phone: ${properties.phone}`,
+          start: { dateTime: booking.startTime, timeZone: CALENDAR_TIME_ZONE },
+          end: { dateTime: booking.endTime, timeZone: CALENDAR_TIME_ZONE },
+          status: "confirmed", transparency: "opaque", visibility: "private",
+          extendedProperties: { private: properties },
+        },
+      })).data;
+    } catch {
+      // An insert may have succeeded before a timeout/409. Read back the same ID;
+      // never retry with a fresh ID or report success without a matching event.
+      try { event = (await existing())?.data; } catch { /* outcome remains unknown */ }
+      if (event === undefined) {
+        throw new Error("Booking outcome is unknown; retry with the same requestId or check the calendar manually");
+      }
+    }
+    return verify(event);
+  });
+  bookingQueue = result.then(() => undefined, () => undefined);
+  return result;
 }
