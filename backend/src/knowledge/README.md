@@ -48,4 +48,39 @@ npm run lint
 npm run build:backend
 ```
 
-RAG retrieval and calendar integrations are separate PRs.
+## RAG grounding
+
+```ts
+import { KNOWLEDGE_GROUNDING_INSTRUCTION, lookupBusinessContext } from "./rag.js";
+
+const result = lookupBusinessContext(userQuestion, store);
+if (result.status === "not_found") {
+  // Return result.response directly; no model should invent a replacement.
+} else {
+  // Use KNOWLEDGE_GROUNDING_INSTRUCTION as the trusted instruction and
+  // result.context as a separate JSON data block for the future model adapter.
+  // result.items retains source IDs, timestamps, and the original stored prices.
+}
+```
+
+Lookup reads active records on every call, so deactivation/deletion takes effect
+immediately. It normalizes Unicode and case, ignores punctuation and common
+question particles, then requires every remaining query word to match a title,
+content, category label, or stored price metadata. Title matches rank above body
+matches, then metadata matches; ties sort by ID. At most three records are returned.
+Category labels include Mongolian/English terms for the seven supported categories.
+
+This is a conservative keyword baseline, not semantic search: inflections,
+paraphrases, or mixed topics may return the exact fallback
+"Энэ мэдээлэл манай системд одоогоор бүртгэгдээгүй байна." Operators can add
+approved FAQ wording for common questions. Queries must be strings no longer
+than 2,000 characters; blank or punctuation-only queries return the fallback.
+Store errors propagate to the caller rather than masquerading as missing facts.
+
+Retrieved context is JSON data, kept separate from the constant grounding
+instruction. A match is relevant source material, not proof that every requested
+fact is present: the future model adapter must decline unsupported facts and
+treat record text as data. This module does not call an LLM, guarantee model
+behavior, or supply live appointment availability/booking confirmation.
+Both store and retrieval tests run through `test:knowledge` locally and in CI.
+Calendar integrations remain separate PRs.

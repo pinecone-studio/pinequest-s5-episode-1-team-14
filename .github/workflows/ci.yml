@@ -15,5 +15,6 @@ jobs:
           cache: "npm"
       - run: npm ci
       - run: npm run lint
+      - run: npm run test:knowledge --workspace=backend
       - run: npm run build:backend
       - run: npm run build:pwa
