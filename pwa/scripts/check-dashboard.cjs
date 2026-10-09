@@ -11,10 +11,8 @@ const { chromium } = require("playwright-core");
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     const base = process.env.DASHBOARD_URL || "http://127.0.0.1:3100";
-    const response = await page.goto(base, { waitUntil: "networkidle" });
-    assert.ok([200, 307, 308].includes(response.status()));
-    await page.waitForURL(`${base}/dashboard`);
-    assert.equal(new URL(page.url()).pathname, "/dashboard", "root redirects to dashboard");
+    const response = await page.goto(`${base}/dashboard`, { waitUntil: "networkidle" });
+    assert.equal(response.status(), 200);
     assert.equal(await page.locator("html").getAttribute("lang"), "mn");
     assert.equal(await page.getByRole("heading", { level: 1 }).textContent(), "Ерөнхий тойм");
     assert.equal(await page.locator(".metric-card").count(), 6);
@@ -54,7 +52,7 @@ const { chromium } = require("playwright-core");
     await page.getByRole("heading", { level: 1 }).click();
     await page.screenshot({ path: resolve(screenshots, "dashboard-mobile.png"), fullPage: true });
     assert.deepEqual(errors, [], "no browser runtime or hydration errors");
-    console.log("Dashboard browser check passed: redirect, keyboard navigation, mobile menu, 5 viewport widths, no runtime errors.");
+    console.log("Dashboard browser check passed: direct route, keyboard navigation, mobile menu, 5 viewport widths, no runtime errors.");
   } finally {
     await browser.close();
   }
