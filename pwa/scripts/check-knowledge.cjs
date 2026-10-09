@@ -13,7 +13,7 @@ const { chromium } = require("playwright-core");
     const demo = process.env.EXPECT_MOCK_KNOWLEDGE === "true";
     assert.equal((await page.goto(`${base}/knowledge`, { waitUntil: "networkidle" })).status(), 200);
     assert.equal(await page.getByRole("heading", { level: 1 }).textContent(), "Мэдээллийн сан");
-    assert.equal(await page.locator('.sidebar a[aria-current="page"]').getAttribute("href"), "/knowledge");
+    assert.equal(await page.locator('.desktop-navigation a[aria-current="page"]').getAttribute("href"), "/knowledge");
     const cards = page.getByRole("article");
     const search = page.getByRole("searchbox", { name: "Гарчиг, агуулга эсвэл ID" });
     const category = page.getByRole("combobox", { name: "Ангиллаар шүүх", exact: true });

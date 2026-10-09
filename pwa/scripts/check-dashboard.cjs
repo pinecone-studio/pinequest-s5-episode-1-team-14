@@ -16,8 +16,8 @@ const { chromium } = require("playwright-core");
     assert.equal(await page.locator("html").getAttribute("lang"), "mn");
     assert.equal(await page.getByRole("heading", { level: 1 }).textContent(), "Ерөнхий тойм");
     assert.equal(await page.locator(".metric-card").count(), 6);
-    assert.equal(await page.locator('.sidebar a[aria-current="page"]').count(), 1);
-    assert.equal(await page.locator(".sidebar button:disabled").count(), 2);
+    assert.equal(await page.locator('.desktop-navigation a[aria-current="page"]').count(), 1);
+    assert.equal(await page.locator(".desktop-navigation button:disabled").count(), 2);
     await page.keyboard.press("Tab");
     assert.equal(await page.locator(":focus").getAttribute("class"), "skip-link");
     await page.keyboard.press("Enter");
@@ -31,7 +31,7 @@ const { chromium } = require("playwright-core");
     for (const width of [320, 390, 768, 1024, 1440]) {
       await page.setViewportSize({ width, height: 844 });
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `horizontal overflow at ${width}px`);
-      assert.equal(await page.locator(".sidebar").isVisible(), width > 800);
+      assert.equal(await page.locator(".desktop-navigation").isVisible(), width > 800);
       assert.equal(await page.locator(".mobile-menu").isVisible(), width <= 800);
     }
     await page.setViewportSize({ width: 390, height: 844 });

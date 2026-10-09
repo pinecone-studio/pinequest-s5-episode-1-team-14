@@ -8,7 +8,9 @@ HTML, CSS, script нь dashboard-оос тусдаа document-д ажиллан�
 | Файл | Юуны тулд |
 |---|---|
 | `index.html` | Хуудасны бүтэц (HTML) болон Tailwind-ийн component style |
-| `assets/css/styles.css` | Өнгө, цайвар/бараан горим, дэвсгэр, хөдөлгөөн |
+| `../theme.css` | Landing болон дотор хуудсуудын нийтлэг өнгө, фонт, цайвар/бараан горим |
+| `../theme-init.js` | Хадгалсан theme тохиргоог хуудас нээгдэхэд сэргээнэ |
+| `assets/css/styles.css` | Landing-ийн дэвсгэр, хөдөлгөөн, байрлал |
 | `assets/js/tailwind.config.js` | Tailwind-ийн өнгө, фонт |
 | `assets/js/config.js` | **Өөрийн мэдээлэл**: `CLINICS`, `DEMO_NUMBER` |
 | `assets/js/data.js` | Захиалга, дуудлагын жишээ өгөгдөл |
