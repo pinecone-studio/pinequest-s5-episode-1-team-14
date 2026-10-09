@@ -2,12 +2,13 @@
 
 `/` serves the approved [PR #14 landing page](https://github.com/pinecone-studio/pinequest-s5-episode-1-team-14/pull/14).
 Its source lives in `public/landing/`; a Next.js rewrite serves the standalone
-HTML without sharing its global styles or scripts with the dashboard. The hero's
+HTML with its own layout and scripts. The hero's
 dashboard link opens `/dashboard`. See [landing setup](docs/landing.md) for files,
 demo placeholders and external Tailwind CDN/Google Fonts requirements.
 
-`/dashboard` opens the dashboard. The `(workspace)` route group shares the sidebar,
-header and content frame. Navigation labels are Mongolian. Future
+`/dashboard` opens the dashboard. The `(workspace)` route group shares the top
+navigation, header and content frame across Dashboard, Calls, Bookings, Knowledge
+and Analytics. Navigation labels are Mongolian. Future
 Demo and Settings sections are visibly disabled
 until their own feature PRs add working routes.
 
@@ -15,9 +16,14 @@ The overview currently shows empty metrics/activity and unknown connection
 states. It does not read backend data or imply that an integration is online.
 Keep actual data loading, authentication and remaining feature pages in separate PRs.
 
-Dashboard styles use plain CSS and local system fonts; no UI/font dependencies or external
-asset requests are added. Small screens use a native `details` menu, while a
-skip link, focus indicators and active-page semantics support keyboard users.
+Workspace styles use plain CSS and the landing's shared palette and Google Fonts
+(Manrope/Unbounded, with system fallbacks). `public/theme.css` is the single source
+for both documents' colors/fonts; `public/theme-init.js` restores the `theme`
+preference before rendering. The header button cycles automatic, light and dark
+modes; the same preference survives navigation between landing and workspace.
+If browser storage is unavailable, switching still works for the current document.
+Small screens use a native `details` menu, while a skip link, focus indicators and
+active-page semantics support keyboard users. No UI dependency is added.
 
 From the repository root:
 
@@ -41,6 +47,7 @@ npm.cmd install --prefix $browserCheckDir --no-package-lock --ignore-scripts --n
 $env:NODE_PATH = Join-Path $browserCheckDir 'node_modules'
 node pwa/scripts/check-dashboard.cjs
 node pwa/scripts/check-landing.cjs
+node pwa/scripts/check-workspace-theme.cjs
 ```
 
 `DASHBOARD_URL` optionally selects a different local server. The check verifies
@@ -52,8 +59,35 @@ The landing check covers `/`, local assets, theme persistence, demo dialogs,
 anchor navigation, reduced motion, five widths and the link into the dashboard.
 Landing screenshots are also written to `pwa/docs/`.
 
+The workspace theme check covers all five routes in dark mode, shared landing
+colors/fonts, theme persistence across navigation/reload, system preference,
+blocked browser storage and the mobile menu. It also saves dark-mode screenshots.
+
 ![Desktop dashboard](docs/dashboard-desktop.png)
 ![Mobile dashboard](docs/dashboard-mobile.png)
+
+## Vercel preview
+
+Deploy from the **repository root**, with the Vercel project's Root Directory set
+to `pwa`, framework **Next.js**, Node **24.x**, and **Include source files outside
+of the Root Directory** enabled. The workspace lockfile and backend type-only
+imports must remain available during the build. Set Install Command to
+`cd .. && npm ci --workspaces --include=dev` so backend dependencies are also
+available for type checking; keep the default Next.js Build Command.
+See [Vercel's monorepo guide](https://vercel.com/docs/monorepos).
+
+```powershell
+vercel link --yes --project ai-frontdesk-mongolia --scope 123uuganas-projects
+vercel deploy --target preview --build-env NEXT_PUBLIC_USE_MOCK_API=true --yes
+```
+
+This preview uses clearly labelled synthetic data. It deploys only the frontend;
+Twilio, Calendar and AI services are not hosted or connected by this command.
+`.vercelignore` excludes local environment files, backend data and review assets.
+No provider keys are required. Vercel may classify the first deployment of a new
+project as Production; subsequent preview URLs may require Vercel account access.
+This is a manual CLI deployment. PR review/merge is separate, and GitHub automatic
+deployments are not connected by these instructions.
 
 ## Calls
 
@@ -160,7 +194,7 @@ cancel paths, price validation, focus, reload reset, five widths and navigation.
 `/analytics` reports call/booking totals, completed calls, booking conversion and
 average call duration, with status/intent bars and a daily table. Select one day
 or all available data. Every date uses `Asia/Ulaanbaatar`, including calls/bookings
-near UTC midnight. The sidebar and mobile menu both enable **Тайлан**.
+near UTC midnight. The top navigation and mobile menu both enable **Тайлан**.
 
 The page reuses `getCalls()` and `getBookings()` fixtures behind the existing
 `NEXT_PUBLIC_USE_MOCK_API=true` flag; it adds no new mock dataset. With the flag

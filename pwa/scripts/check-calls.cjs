@@ -13,7 +13,7 @@ const { chromium } = require("playwright-core");
     const demo = process.env.EXPECT_MOCK_CALLS === "true";
     assert.equal((await page.goto(`${base}/calls`, { waitUntil: "networkidle" })).status(), 200);
     assert.equal(await page.getByRole("heading", { level: 1 }).textContent(), "Дуудлагууд");
-    assert.equal(await page.locator('.sidebar a[aria-current="page"]').getAttribute("href"), "/calls");
+    assert.equal(await page.locator('.desktop-navigation a[aria-current="page"]').getAttribute("href"), "/calls");
     assert.equal(await page.locator(".breadcrumb strong").textContent(), "Дуудлагууд");
     const search = page.getByRole("searchbox", { name: "Утас эсвэл дуудлагын ID" });
     const status = page.getByRole("combobox", { name: "Төлөв" });

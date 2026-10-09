@@ -16,7 +16,7 @@ const { chromium } = require("playwright-core");
     assert.equal(response.status(), 200);
     assert.doesNotMatch(await response.text(), /callerPhone|customerName|calendarEventId|demo-call-|demo-booking-/, "report payload excludes customer identifiers");
     assert.equal(await page.getByRole("heading", { level: 1 }).textContent(), "Тайлан");
-    assert.equal(await page.locator('.sidebar a[aria-current="page"]').getAttribute("href"), "/analytics");
+    assert.equal(await page.locator('.desktop-navigation a[aria-current="page"]').getAttribute("href"), "/analytics");
     const date = page.getByLabel("Өдөр", { exact: true });
     const reset = page.getByRole("button", { name: "Бүх өдөр", exact: true });
     const metric = (label) => page.locator(".analytics-metric").filter({ has: page.getByText(label, { exact: true }) }).locator(".analytics-value");
