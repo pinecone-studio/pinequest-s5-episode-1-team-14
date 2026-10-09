@@ -71,8 +71,10 @@ blocked browser storage and the mobile menu. It also saves dark-mode screenshots
 Deploy from the **repository root**, with the Vercel project's Root Directory set
 to `pwa`, framework **Next.js**, Node **24.x**, and **Include source files outside
 of the Root Directory** enabled. The workspace lockfile and backend type-only
-imports must remain available during the build. Keep the default build/install
-commands. See [Vercel's monorepo guide](https://vercel.com/docs/monorepos).
+imports must remain available during the build. Set Install Command to
+`cd .. && npm ci --workspaces --include=dev` so backend dependencies are also
+available for type checking; keep the default Next.js Build Command.
+See [Vercel's monorepo guide](https://vercel.com/docs/monorepos).
 
 ```powershell
 vercel link --yes --project ai-frontdesk-mongolia --scope 123uuganas-projects
@@ -82,8 +84,10 @@ vercel deploy --target preview --build-env NEXT_PUBLIC_USE_MOCK_API=true --yes
 This preview uses clearly labelled synthetic data. It deploys only the frontend;
 Twilio, Calendar and AI services are not hosted or connected by this command.
 `.vercelignore` excludes local environment files, backend data and review assets.
-No provider keys are required for this preview. Vercel may require account access
-to open a protected preview; production promotion follows the team's human review.
+No provider keys are required. Vercel may classify the first deployment of a new
+project as Production; subsequent preview URLs may require Vercel account access.
+This is a manual CLI deployment. PR review/merge is separate, and GitHub automatic
+deployments are not connected by these instructions.
 
 ## Calls
 
