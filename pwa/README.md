@@ -8,7 +8,7 @@ demo placeholders and external Tailwind CDN/Google Fonts requirements.
 
 `/dashboard` opens the dashboard. The `(workspace)` route group shares the sidebar,
 header and content frame. Navigation labels are Mongolian. Future
-Analytics, Demo and Settings sections are visibly disabled
+Demo and Settings sections are visibly disabled
 until their own feature PRs add working routes.
 
 The overview currently shows empty metrics/activity and unknown connection
@@ -154,4 +154,48 @@ cancel paths, price validation, focus, reload reset, five widths and navigation.
 
 ![Desktop knowledge](docs/knowledge-desktop.png)
 ![Mobile knowledge](docs/knowledge-mobile.png)
+
+## Analytics
+
+`/analytics` reports call/booking totals, completed calls, booking conversion and
+average call duration, with status/intent bars and a daily table. Select one day
+or all available data. Every date uses `Asia/Ulaanbaatar`, including calls/bookings
+near UTC midnight. The sidebar and mobile menu both enable **Тайлан**.
+
+The page reuses `getCalls()` and `getBookings()` fixtures behind the existing
+`NEXT_PUBLIC_USE_MOCK_API=true` flag; it adds no new mock dataset. With the flag
+off, metrics are unavailable (`—`), not fake zeros. The server sends only reporting
+fields to this page, omitting names, phone numbers, booking IDs and provider IDs.
+
+Metric definitions:
+
+- Call totals and daily grouping use the call's start date, including active calls.
+- Completed calls count only `completed`; this is not evidence of an AI answer.
+- Conversion = finished calls with `bookingCreated=true` / all finished calls.
+  Finished includes `completed`, `failed` and `handed_off`; active calls are excluded
+  from both numerator and denominator, even when they already have a booking.
+- Average duration includes all finished calls, including zero-duration failures,
+  rounded to the nearest second. With no finished calls, conversion/duration are `—`.
+- Booking totals/grouping use the scheduled appointment date, not the creation date.
+  They are independent of conversion's call cohort; daily rows include only dates
+  with calls or appointments. A selected day without records has real zero counts.
+- Revenue, ROI and AI answer rate remain unavailable: bookings lack a recorded
+  price, costs and explicit answer events are absent. No financial figures are inferred.
+
+Run `npm run test:analytics --workspace=pwa` for offline aggregation tests (also in CI).
+This reuses the `tsx` test runner already used by the backend; no chart/UI library is added.
+With the optional browser tooling and production server described above, run:
+
+```powershell
+$env:EXPECT_MOCK_ANALYTICS = 'true' # Match the build flag; also check false.
+node pwa/scripts/check-analytics.cjs
+```
+
+The check covers both data modes, exact demo metrics, date/reset/empty states,
+Ulaanbaatar boundaries in a different browser timezone, anonymous report payloads,
+keyboard table scrolling, mobile navigation and five widths. Live API loading and
+provider calls remain outside this PR. Review screenshots:
+
+![Desktop analytics](docs/analytics-desktop.png)
+![Mobile analytics](docs/analytics-mobile.png)
 ![Knowledge editor](docs/knowledge-editor.png)

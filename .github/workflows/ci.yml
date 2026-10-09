@@ -18,5 +18,6 @@ jobs:
       - run: npm run test:knowledge --workspace=backend
       - run: npm run test:calendar --workspace=backend
       - run: npm run test:calls --workspace=backend
+      - run: npm run test:analytics --workspace=pwa
       - run: npm run build:backend
       - run: npm run build:pwa

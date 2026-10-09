@@ -8,7 +8,7 @@ const sections = [
   { label: "Дуудлагууд", href: "/calls", enabled: true, path: "M7 3H4a1 1 0 0 0-1 1c0 9.4 7.6 17 17 17a1 1 0 0 0 1-1v-3l-5-2-2 2a14 14 0 0 1-7-7l2-2-2-5Z" },
   { label: "Захиалгууд", href: "/bookings", enabled: true, path: "M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2ZM7 3v4m10-4v4M3 11h18m-13 5h3" },
   { label: "Мэдээллийн сан", href: "/knowledge", enabled: true, path: "M12 5C9 3 5 3 2 4v15c3-1 7-1 10 1 3-2 7-2 10-1V4c-3-1-7-1-10 1Zm0 0v15" },
-  { label: "Тайлан", href: "/analytics", enabled: false, path: "M4 3v17h17M8 15v-4m5 4V7m5 8V4" },
+  { label: "Тайлан", href: "/analytics", enabled: true, path: "M4 3v17h17M8 15v-4m5 4V7m5 8V4" },
   { label: "Туршилтын дуудлага", href: "/demo", enabled: false, path: "M9 4v16l12-8L9 4ZM3 5v14" },
   { label: "Тохиргоо", href: "/settings", enabled: false, path: "M4 7h16M4 17h16M8 4v6m8 4v6" },
 ];
