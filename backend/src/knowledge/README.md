@@ -66,12 +66,14 @@ if (result.status === "not_found") {
 Lookup reads active records on every call, so deactivation/deletion takes effect
 immediately. It normalizes Unicode and case, ignores punctuation and common
 question particles, then requires every remaining query word to match a title,
-content, category label, or stored price metadata. Title matches rank above body
-matches, then metadata matches; ties sort by ID. At most three records are returned.
-Category labels include Mongolian/English terms for the seven supported categories.
+content, category label, or stored price metadata (exactly, or via
+`mongolianMorphology.ts`'s `sharesRoot` for a common suffix like "цагт" ~ "цаг").
+Title matches rank above body matches, then metadata matches; ties sort by ID.
+At most three records are returned. Category labels include Mongolian/English
+terms for the seven supported categories.
 
-This is a conservative keyword baseline, not semantic search: inflections,
-paraphrases, or mixed topics may return the exact fallback
+This is a conservative keyword baseline, not semantic search: paraphrases or
+mixed topics may still return the exact fallback
 "Энэ мэдээлэл манай системд одоогоор бүртгэгдээгүй байна." Operators can add
 approved FAQ wording for common questions. Queries must be strings no longer
 than 2,000 characters; blank or punctuation-only queries return the fallback.

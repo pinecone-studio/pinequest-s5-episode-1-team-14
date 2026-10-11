@@ -1,3 +1,4 @@
+import { sharesRoot } from "./mongolianMorphology.js";
 import { BusinessKnowledgeStore, type KnowledgeItem } from "./store.js";
 
 export const NO_KNOWLEDGE_RESPONSE = "Энэ мэдээлэл манай системд одоогоор бүртгэгдээгүй байна.";
@@ -48,14 +49,16 @@ export function lookupBusinessContext(
   };
   if (!terms.length) return missing;
 
-  // ponytail: exact Unicode keyword scan, all meaningful terms required; add
-  // evaluated Mongolian stemming/semantic search when paraphrase recall matters.
+  // ponytail: Unicode keyword scan with light Монгол нөхцөл-ялгах тааруулга
+  // (sharesRoot); бүх үг таарах шаардлагатай хэвээр — хэтрүүлэн тааруулахгүй.
+  const matches = (term: string, set: Set<string>) =>
+    [...set].some((token) => sharesRoot(term, token));
   const ranked = store.list({ activeOnly: true }).map((item) => {
     const title = tokens(item.title);
     const body = tokens(item.content);
     const metadata = tokens(CATEGORY_TERMS[item.category] +
       (item.price === undefined ? "" : ` үнэ үнэтэй price cost ${item.price}`));
-    const weights = terms.map((term) => title.has(term) ? 3 : body.has(term) ? 2 : metadata.has(term) ? 1 : 0);
+    const weights = terms.map((term) => matches(term, title) ? 3 : matches(term, body) ? 2 : matches(term, metadata) ? 1 : 0);
     return { item, score: weights.every(Boolean) ? weights.reduce<number>((sum, weight) => sum + weight, 0) : 0 };
   }).filter(({ score }) => score > 0);
   ranked.sort((a, b) => b.score - a.score || a.item.id.localeCompare(b.item.id, "en"));
