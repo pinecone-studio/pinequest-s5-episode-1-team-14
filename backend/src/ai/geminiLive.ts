@@ -105,6 +105,9 @@ export type GeminiLiveCallbacks = {
   onOpen?: () => void;
   onText?: (text: string) => void;
   onTurnComplete?: () => void;
+  // Дуудагч AI-г таслан орж ярихад Gemini-ийн дотоод VAD илрүүлээд дуудна —
+  // тоглуулж буй/дараалалд буй хариултыг шууд зогсоох дохио.
+  onInterrupted?: () => void;
   onError?: (message: string) => void;
   onClose?: (reason: string) => void;
 };
@@ -129,6 +132,7 @@ export async function createGeminiLiveSession(callbacks: GeminiLiveCallbacks) {
         if (process.env.DEBUG_GEMINI) console.debug("[gemini]", JSON.stringify(message));
         const text = message.serverContent?.outputTranscription?.text;
         if (text) callbacks.onText?.(text);
+        if (message.serverContent?.interrupted) callbacks.onInterrupted?.();
         if (message.serverContent?.turnComplete) callbacks.onTurnComplete?.();
 
         if (message.toolCall?.functionCalls) {
