@@ -4,7 +4,7 @@
 // serverContent.outputTranscription-ээс авна (аудиог үл хэрэгсэнэ, ElevenLabs
 // доод түвшинд бодит дуу хоолой гаргана).
 
-import { GoogleGenAI, Modality, Type } from "@google/genai";
+import { GoogleGenAI, Modality, Type, type Tool } from "@google/genai";
 import { lookupBusinessContext, KNOWLEDGE_GROUNDING_INSTRUCTION } from "../knowledge/rag.js";
 import { checkAvailability, createAppointment } from "../calendar/googleCalendar.js";
 import { randomUUID } from "node:crypto";
@@ -24,7 +24,7 @@ const PERSONA_INSTRUCTION = `Чи бол Улаанбаатар хотын жи�
 
 const SYSTEM_INSTRUCTION = `${PERSONA_INSTRUCTION}\n\n${KNOWLEDGE_GROUNDING_INSTRUCTION}`;
 
-const TOOLS = [
+const TOOLS: Tool[] = [
   {
     functionDeclarations: [
       {
