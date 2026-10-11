@@ -2,6 +2,7 @@ import "dotenv/config";
 import { createServer, type IncomingMessage } from "node:http";
 import { WebSocketServer } from "ws";
 import { buildMediaStreamTwiml, handleTwilioMediaStream } from "./telephony/twilio.js";
+import { isValidTwilioSignature } from "./telephony/twilioSignature.js";
 
 const PORT = Number(process.env.PORT ?? 8080);
 
@@ -11,9 +12,30 @@ async function readBody(req: IncomingMessage): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+// Twilio ngrok/reverse-proxy-ийн цаана https-ээр дуудсан ч бидэнд энгийн
+// http хүсэлт ирдэг тул анхны public URL-ийг толгойноос сэргээнэ.
+function publicUrl(req: IncomingMessage): string {
+  const proto = String(req.headers["x-forwarded-proto"] ?? "https").split(",")[0].trim();
+  return `${proto}://${req.headers.host}${req.url}`;
+}
+
 const server = createServer(async (req, res) => {
   if (req.method === "POST" && req.url === "/voice") {
-    const params = new URLSearchParams(await readBody(req));
+    const body = await readBody(req);
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    if (!authToken) {
+      console.error("[voice] TWILIO_AUTH_TOKEN тохируулаагүй тул webhook баталгаажуулж чадахгүй байна");
+      res.writeHead(500);
+      res.end();
+      return;
+    }
+    const params = new URLSearchParams(body);
+    if (!isValidTwilioSignature(authToken, publicUrl(req), params, req.headers["x-twilio-signature"])) {
+      console.error("[voice] Twilio гарын үсэг буруу байна — хүсэлтийг татгалзлаа");
+      res.writeHead(403);
+      res.end();
+      return;
+    }
     const twiml = buildMediaStreamTwiml(`wss://${req.headers.host}/media-stream`, {
       callerPhone: params.get("From") ?? "",
     });
