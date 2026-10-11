@@ -13,7 +13,7 @@ const { chromium } = require("playwright-core");
     const demo = process.env.EXPECT_MOCK_BOOKINGS === "true";
     assert.equal((await page.goto(`${base}/bookings`, { waitUntil: "networkidle" })).status(), 200);
     assert.equal(await page.getByRole("heading", { level: 1 }).textContent(), "Захиалгууд");
-    assert.equal(await page.locator('.sidebar a[aria-current="page"]').getAttribute("href"), "/bookings");
+    assert.equal(await page.locator('.desktop-navigation a[aria-current="page"]').getAttribute("href"), "/bookings");
     assert.equal(await page.locator(".breadcrumb strong").textContent(), "Захиалгууд");
     const search = page.getByRole("searchbox", { name: "Нэр, утас, үйлчилгээ эсвэл ID" });
     const date = page.getByLabel("Өдөр · Улаанбаатар", { exact: true });
