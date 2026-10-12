@@ -4,8 +4,10 @@
 
 import type { WebSocket, RawData } from "ws";
 import { createGeminiLiveSession } from "../ai/geminiLive.js";
+import { CALL_GREETING } from "../ai/callPrompt.js";
 import { synthesizeToUlaw8k } from "../voice/elevenlabs.js";
 import { CallSessionStore } from "../calls/store.js";
+import { takeSentences } from "./sentences.js";
 
 const MULAW_BIAS = 0x84;
 const MULAW_CLIP = 32635;
@@ -85,7 +87,6 @@ type TwilioStreamMessage =
 
 export function handleTwilioMediaStream(ws: WebSocket): void {
   const store = new CallSessionStore();
-  const sentenceBoundary = /[.!?]/;
   let streamSid = "";
   let callId = "";
   let pendingText = "";
@@ -108,13 +109,9 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
   }
 
   function onText(delta: string): void {
-    pendingText += delta;
-    let match: RegExpMatchArray | null;
-    while ((match = pendingText.match(sentenceBoundary))) {
-      const splitAt = (match.index ?? 0) + 1;
-      enqueueSpeak(pendingText.slice(0, splitAt));
-      pendingText = pendingText.slice(splitAt);
-    }
+    const { sentences, rest } = takeSentences(pendingText + delta);
+    sentences.forEach(enqueueSpeak);
+    pendingText = rest;
   }
 
   function onTurnComplete(): void {
@@ -144,12 +141,14 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
         callId = message.start.callSid;
         const callerPhone = normalizePhone(message.start.customParameters?.callerPhone);
         store.start({ id: callId, callerPhone, startedAt: new Date().toISOString() });
+        // Gemini холбогдох хооронд дуудагч чимээгүй хүлээхгүйн тулд эхэлж мэндэлнэ.
+        enqueueSpeak(CALL_GREETING);
         geminiSession = await createGeminiLiveSession({
           onText,
           onTurnComplete,
           onError: (msg) => console.error("[twilio] Gemini алдаа:", msg),
           onClose: endCall,
-        });
+        }, { callerPhone });
         return;
       }
 

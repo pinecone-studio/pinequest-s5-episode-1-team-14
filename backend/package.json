@@ -12,6 +12,7 @@
     "test:knowledge": "tsx --test src/knowledge/store.test.ts src/knowledge/rag.test.ts",
     "test:calendar": "tsx --test src/calendar/googleCalendar.test.ts src/calendar/booking.test.ts",
     "test:calls": "tsx --test src/calls/store.test.ts",
+    "test:call-flow": "tsx --test src/ai/callPrompt.test.ts src/telephony/sentences.test.ts",
     "voice:set": "tsx src/voice/set-voice.ts"
   },
   "dependencies": {

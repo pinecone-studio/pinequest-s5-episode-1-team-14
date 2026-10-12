@@ -1,41 +1,21 @@
-// Gemini Live session: Монгол хэлний AI ресепшн ажилтан, RAG болон Calendar
-// function calling-той. gemini-3.8-live нь responseModalities: TEXT дэмждэггүй
+// Gemini Live session: Монгол хэлний AI ресепшн ажилтан, Calendar function
+// calling-той. Бизнесийн мэдлэг system instruction-д бүхлээрээ орно
+// (callPrompt.ts). gemini-3.8-live нь responseModalities: TEXT дэмждэггүй
 // тул AUDIO + outputAudioTranscription ашиглаж, текстийг
 // serverContent.outputTranscription-ээс авна (аудиог үл хэрэгсэнэ, ElevenLabs
 // доод түвшинд бодит дуу хоолой гаргана).
 
 import { GoogleGenAI, Modality, Type, type Tool } from "@google/genai";
-import { lookupBusinessContext, KNOWLEDGE_GROUNDING_INSTRUCTION } from "../knowledge/rag.js";
+import { BusinessKnowledgeStore } from "../knowledge/store.js";
 import { checkAvailability, createAppointment } from "../calendar/googleCalendar.js";
+import { buildSystemInstruction } from "./callPrompt.js";
 import { randomUUID } from "node:crypto";
 
 const MODEL = "gemini-3.8-live";
 
-const PERSONA_INSTRUCTION = `Чи бол Улаанбаатар хотын жижиг рестораны монгол
-хэлээр ярьдаг AI ресепшн ажилтан. Зочдод эелдэг, товч, ойлгомжтой хариулна.
-
-Цаг захиалгатай холбоотой дүрэм (ЗААВАЛ):
-- Захиалгыг ХЭЗЭЭ Ч "баталгаажлаа", "захиаллаа" гэж амаар бүү хэл — зөвхön
-  create_appointment function амжилттай ажилласны дараа л баталгаажсан гэж үзнэ.
-- create_appointment дуудахаасаа өмнө заавал check_availability-гаар сул цаг
-  шалгасан байх ёстой.
-- Функц алдаа буцаавал зочинд үнэнээр хэлж, өөр цаг санал болго, худал
-  баталгаажуулалт бүү хэл.`;
-
-const SYSTEM_INSTRUCTION = `${PERSONA_INSTRUCTION}\n\n${KNOWLEDGE_GROUNDING_INSTRUCTION}`;
-
 const TOOLS: Tool[] = [
   {
     functionDeclarations: [
-      {
-        name: "lookup_business_info",
-        description: "Рестораны цэс, цагийн хуваарь, журам зэрэг мэдээлэл хайх.",
-        parameters: {
-          type: Type.OBJECT,
-          properties: { query: { type: Type.STRING, description: "Хэрэглэгчийн асуулт" } },
-          required: ["query"],
-        },
-      },
       {
         name: "check_availability",
         description: "Тухайн өдөр, цагийн хязгаарт сул цаг байгаа эсэхийг шалгах.",
@@ -52,7 +32,7 @@ const TOOLS: Tool[] = [
       },
       {
         name: "create_appointment",
-        description: "Баталгаажсан захиалга үүсгэх — зөвхön check_availability-ээр сул гэдгийг нотолсны дараа дуудна.",
+        description: "Баталгаажсан захиалга үүсгэх — зөвхөн check_availability-ээр сул гэдгийг нотолсны дараа дуудна.",
         parameters: {
           type: Type.OBJECT,
           properties: {
@@ -73,8 +53,6 @@ const TOOLS: Tool[] = [
 async function runTool(name: string, args: Record<string, unknown>): Promise<unknown> {
   try {
     switch (name) {
-      case "lookup_business_info":
-        return lookupBusinessContext(String(args.query));
       case "check_availability":
         return await checkAvailability({
           date: String(args.date),
@@ -109,18 +87,25 @@ export type GeminiLiveCallbacks = {
   onClose?: (reason: string) => void;
 };
 
-export async function createGeminiLiveSession(callbacks: GeminiLiveCallbacks) {
+export async function createGeminiLiveSession(
+  callbacks: GeminiLiveCallbacks,
+  context: { callerPhone?: string | null } = {},
+) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY тохируулаагүй байна");
 
   const ai = new GoogleGenAI({ apiKey });
+  const systemInstruction = buildSystemInstruction({
+    knowledge: new BusinessKnowledgeStore().list({ activeOnly: true }),
+    callerPhone: context.callerPhone,
+  });
 
   const session = await ai.live.connect({
     model: MODEL,
     config: {
       responseModalities: [Modality.AUDIO],
       outputAudioTranscription: {},
-      systemInstruction: SYSTEM_INSTRUCTION,
+      systemInstruction,
       tools: TOOLS,
     },
     callbacks: {
