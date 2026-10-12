@@ -27,3 +27,25 @@ export function streamUlaw8k(text: string): Promise<AsyncIterable<Uint8Array>> {
     outputFormat: "ulaw_8000",
   });
 }
+
+const fixedSpeech = new Map<string, Promise<Buffer>>();
+
+async function collect(text: string): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of await streamUlaw8k(text)) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks);
+}
+
+// Мэндчилгээ шиг тогтмол өгүүлбэрийг нэг удаа синтезлээд санах ойд хадгална —
+// дуудлага авмагц TTS-ийг хүлээлгүй шууд тоглуулна. Voice эсвэл загвар
+// солигдвол шинээр үүсгэнэ; амжилтгүй болсон оролдлогыг хадгалахгүй.
+export async function cachedUlaw8k(text: string): Promise<Buffer> {
+  const key = `${getActiveVoiceId()}|${process.env.ELEVENLABS_MODEL_ID || DEFAULT_MODEL_ID}|${text}`;
+  let audio = fixedSpeech.get(key);
+  if (!audio) {
+    audio = collect(text);
+    fixedSpeech.set(key, audio);
+    audio.catch(() => fixedSpeech.delete(key));
+  }
+  return audio;
+}

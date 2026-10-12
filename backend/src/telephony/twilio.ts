@@ -7,7 +7,7 @@
 import type { WebSocket, RawData } from "ws";
 import { createGeminiLiveSession } from "../ai/geminiLive.js";
 import { CALL_GREETING } from "../ai/callPrompt.js";
-import { streamUlaw8k } from "../voice/elevenlabs.js";
+import { cachedUlaw8k, streamUlaw8k } from "../voice/elevenlabs.js";
 import { CallSessionStore } from "../calls/store.js";
 import { takeSentences } from "./sentences.js";
 import { consumeStreamToken } from "./streamTokens.js";
@@ -100,6 +100,16 @@ function normalizePhone(value: unknown): string | null {
   return typeof value === "string" && PHONE_PATTERN.test(value) ? value : null;
 }
 
+// Дуудлага шилжүүлэлтээр (call forwarding) ирэхэд зарим оператор жинхэнэ
+// дуудагчийн оронд бизнесийн дугаарыг From-д тавьдаг. Тэр тохиолдолд
+// дугаарыг тодорхойгүй гэж үзнэ — agent амаар асууна.
+export function resolveCallerPhone(params: URLSearchParams): string {
+  const last8 = (name: string) => (params.get(name) ?? "").replace(/\D/g, "").slice(-8);
+  const from = last8("From");
+  if (from.length < 8 || from === last8("To") || from === last8("ForwardedFrom")) return "";
+  return params.get("From") ?? "";
+}
+
 function escapeXml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
@@ -153,9 +163,9 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
 
   // Аудиог ирэх тусам нь хүлээлгүй явуулна — Twilio өөрөө буферлээд бодит
   // хурдаар тоглуулдаг тул 20мс-ийн таймер хэрэггүй.
-  async function speak(text: string, generation: number): Promise<void> {
+  async function speak(text: string, generation: number, fixed: boolean): Promise<void> {
     if (closed || generation !== speechGeneration || !text.trim()) return;
-    const audio = await streamUlaw8k(text);
+    const audio = fixed ? [await cachedUlaw8k(text)] : await streamUlaw8k(text);
     streaming = true;
     try {
       for await (const chunk of audio) {
@@ -169,9 +179,10 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
     }
   }
 
-  function enqueueSpeak(text: string): void {
+  // fixed: урьдчилан бэлдсэн (санах ойд хадгалсан) тогтмол өгүүлбэр.
+  function enqueueSpeak(text: string, fixed = false): void {
     const generation = speechGeneration;
-    speakQueue = speakQueue.then(() => speak(text, generation)).catch((error) => console.error("[twilio] ярих алдаа:", error));
+    speakQueue = speakQueue.then(() => speak(text, generation, fixed)).catch((error) => console.error("[twilio] ярих алдаа:", error));
   }
 
   // Дуудагч AI-г таслан орж ярихад: тоглуулж буй/дараалалд буй үгсийг хаяж,
@@ -190,7 +201,7 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
 
   function onText(delta: string): void {
     const { sentences, rest } = takeSentences(pendingText + delta);
-    sentences.forEach(enqueueSpeak);
+    sentences.forEach((sentence) => enqueueSpeak(sentence));
     pendingText = rest;
   }
 
@@ -234,7 +245,7 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
         const callerPhone = normalizePhone(message.start.customParameters?.callerPhone);
         store.start({ id: callId, callerPhone, startedAt: new Date().toISOString() });
         // Gemini холбогдох хооронд дуудагч чимээгүй хүлээхгүйн тулд эхэлж мэндэлнэ.
-        if (!nativeVoice) enqueueSpeak(CALL_GREETING);
+        if (!nativeVoice) enqueueSpeak(CALL_GREETING, true);
         geminiSession = await createGeminiLiveSession({
           ...(nativeVoice ? { onAudio: onGeminiAudio } : { onText, onTurnComplete }),
           onInterrupted,
