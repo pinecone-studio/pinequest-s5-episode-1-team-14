@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test:analytics": "tsx --test lib/analytics.test.ts"
+    "test:analytics": "tsx --test lib/analytics.test.ts lib/overview.test.ts"
   },
   "dependencies": {
     "next": "^14.2.0",

@@ -1,4 +1,5 @@
 import type { KnowledgeItem } from "../../backend/src/knowledge/store";
+import { fetchBackend, isMockMode, type DataSource } from "./data-source";
 
 export const knowledgeCategories: Record<KnowledgeItem["category"], string> = {
   business_info: "Бизнесийн мэдээлэл", opening_hours: "Цагийн хуваарь", service: "Үйлчилгээ",
@@ -15,7 +16,8 @@ const demoItems: KnowledgeItem[] = [
   { id: "demo-knowledge-07", category: "promotion", title: "Арчилгааны зөвлөгөө", content: "Жишээ урамшуулал: үнэ төлбөргүй арчилгааны зөвлөгөө. Батлах шаардлагатай.", price: 0, active: false, updatedAt: "2026-10-07T16:15:00.000Z" },
 ];
 
-export function getKnowledge(): { items: KnowledgeItem[]; isDemo: boolean } {
-  const isDemo = process.env.NEXT_PUBLIC_USE_MOCK_API === "true";
-  return { items: isDemo ? [...demoItems] : [], isDemo };
+export async function getKnowledge(): Promise<{ items: KnowledgeItem[]; source: DataSource }> {
+  if (isMockMode()) return { items: [...demoItems], source: "demo" };
+  const items = await fetchBackend<KnowledgeItem[]>("/api/knowledge");
+  return items ? { items, source: "live" } : { items: [], source: "offline" };
 }

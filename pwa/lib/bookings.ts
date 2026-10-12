@@ -1,4 +1,6 @@
 import type { Booking } from "../../backend/src/calendar/googleCalendar";
+import { fetchBackend, isMockMode, type DataSource } from "./data-source";
+import { formatUlaanbaatarTime } from "./date-time";
 
 const demoBookings: Booking[] = [
   {
@@ -33,9 +35,33 @@ const demoBookings: Booking[] = [
   },
 ];
 
-export function getBookings(): { bookings: Booking[]; isDemo: boolean } {
-  const isDemo = process.env.NEXT_PUBLIC_USE_MOCK_API === "true";
-  // ponytail: synthetic history only until a reviewed, authenticated booking-list API exists.
-  const bookings = isDemo ? [...demoBookings].sort((a, b) => Date.parse(a.startTime) - Date.parse(b.startTime) || a.id.localeCompare(b.id)) : [];
-  return { bookings, isDemo };
+export async function getBookings(): Promise<{ bookings: Booking[]; source: DataSource }> {
+  if (isMockMode()) {
+    return { bookings: [...demoBookings].sort((a, b) => Date.parse(a.startTime) - Date.parse(b.startTime) || a.id.localeCompare(b.id)), source: "demo" };
+  }
+  const bookings = await fetchBackend<Booking[]>("/api/bookings");
+  return bookings ? { bookings, source: "live" } : { bookings: [], source: "offline" };
+}
+
+const DAY_MS = 86400000;
+const WEEKDAYS = ["Ням", "Даваа", "Мягмар", "Лхагва", "Пүрэв", "Баасан", "Бямба"];
+const dayOf = (time: number | string) => formatUlaanbaatarTime(new Date(time).toISOString()).slice(0, 10);
+
+export type BookingDay = { date: string; label: string; items: Booking[] };
+
+// Захиалгуудыг Улаанбаатарын өдрөөр бүлэглэнэ: өнөөдрөөс хойшхи нь ойроосоо эхэлж,
+// өнгөрсөн нь шинээсээ эхэлж. Өдөр доторх захиалга цагийн дарааллаар.
+export function groupBookings(bookings: readonly Booking[], now: number): { upcoming: BookingDay[]; past: BookingDay[] } {
+  const today = dayOf(now), tomorrow = dayOf(now + DAY_MS);
+  const days = new Map<string, Booking[]>();
+  for (const booking of [...bookings].sort((a, b) => Date.parse(a.startTime) - Date.parse(b.startTime) || a.id.localeCompare(b.id))) {
+    const date = dayOf(booking.startTime);
+    days.set(date, [...(days.get(date) ?? []), booking]);
+  }
+  const all = [...days].sort(([a], [b]) => a.localeCompare(b)).map(([date, items]) => {
+    const [year, month, day] = date.split(".").map(Number);
+    const weekday = WEEKDAYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
+    return { date, items, label: date === today ? "Өнөөдөр" : date === tomorrow ? "Маргааш" : `${date.slice(5)} · ${weekday}` };
+  });
+  return { upcoming: all.filter(({ date }) => date >= today), past: all.filter(({ date }) => date < today).reverse() };
 }

@@ -2,67 +2,84 @@
 
 import { useRef, useState } from "react";
 import type { KnowledgeItem } from "../../backend/src/knowledge/store";
+import type { DataSource } from "@/lib/data-source";
 import { knowledgeCategories } from "@/lib/knowledge";
-import { formatUlaanbaatarTime } from "@/lib/date-time";
 import KnowledgeEditor from "./knowledge-editor";
+import { Banner, Empty, Icon, PageHeader, SourceBadge } from "./ui";
 
-export default function KnowledgePage({ items: initialItems, isDemo }: { items: KnowledgeItem[]; isDemo: boolean }) {
-  const [items, setItems] = useState(initialItems);
+const STATUS_FILTERS = [{ value: "", label: "Бүгд" }, { value: "active", label: "Баталгаажсан" }, { value: "draft", label: "Ноорог" }];
+// Зочин хамгийн их асуудаг зүйлс эхэндээ.
+const CATEGORY_ORDER: KnowledgeItem["category"][] = ["opening_hours", "product", "service", "promotion", "faq", "policy", "business_info"];
+
+export default function KnowledgePage({ items: initialItems, source }: { items: KnowledgeItem[]; source: DataSource }) {
+  const [draftItems, setItems] = useState(initialItems);
   const [query, setQuery] = useState("");
-  const [category, setCategory] = useState("");
   const [status, setStatus] = useState("");
   const [editor, setEditor] = useState<KnowledgeItem | null | undefined>();
   const [message, setMessage] = useState("");
   const listTitle = useRef<HTMLHeadingElement>(null);
+  // ponytail: засвар зөвхөн жишээ горимд, хуудсан дээр түр хадгалагдана; бодит CRUD API хараахан байхгүй.
+  const editable = source === "demo";
+  const items = editable ? draftItems : initialItems;
   const search = query.trim().toLowerCase();
-  const filtered = items.filter((item) => (!category || item.category === category) &&
-    (!status || item.active === (status === "active")) &&
-    (!search || [item.title, item.content, item.id].some((value) => value.toLowerCase().includes(search))))
-    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.id.localeCompare(b.id));
-  function reset() { setQuery(""); setCategory(""); setStatus(""); }
+  const filtered = items.filter((item) => (!status || item.active === (status === "active")) &&
+    (!search || [item.title, item.content].some((value) => value.toLowerCase().includes(search))));
+  const sections = CATEGORY_ORDER.map((category) => ({
+    category, rows: filtered.filter((item) => item.category === category).sort((a, b) => a.title.localeCompare(b.title, "mn")),
+  })).filter(({ rows }) => rows.length > 0);
+  function reset() { setQuery(""); setStatus(""); }
   function closeEditor() { setEditor(undefined); listTitle.current?.focus(); }
 
   return <>
-    <div className="page-heading">
-      <div><p className="eyebrow">БАТАЛГААТАЙ МЭДЭЭЛЭЛ</p><h1>Мэдээллийн сан</h1><p className="page-description">Үйлчилгээ, үнэ, цагийн хуваарь болон түгээмэл асуултуудаа удирдах.</p></div>
-      <span className="waiting-badge"><span aria-hidden="true" />{isDemo ? "Туршилтын өгөгдөл" : "Холболт хүлээж байна"}</span>
-    </div>
-    <p className="calls-notice">{isDemo
-      ? "Зөвхөн жишээ мэдээлэл. Өөрчлөлтүүд энэ хуудсанд түр хадгалагдаж, хуудас шинэчлэхэд арилна. Бодит AI туслахын мэдээлэл өөрчлөгдөхгүй."
-      : "Мэдээллийн сан хараахан холбогдоогүй байна. Холбогдсоны дараа мэдээллээ удирдах боломжтой болно."}</p>
-    {isDemo && editor !== undefined && <KnowledgeEditor key={editor?.id ?? "new"} item={editor} onCancel={closeEditor} onSave={(draft) => {
-      // ponytail: page-local demo edits only; replace with authenticated CRUD before storing real knowledge.
+    <PageHeader title="Мэдээллийн сан" subtitle="AI туслах зочдод яг энэ мэдээллээр хариулна.">
+      <SourceBadge source={source} />
+      {editable && <button type="button" className="btn btn-primary" disabled={editor !== undefined} onClick={() => { setMessage(""); setEditor(null); }}><Icon name="plus" size={15} />Мэдээлэл нэмэх</button>}
+    </PageHeader>
+    {source === "demo" && <Banner>Жишээ мэдээлэл. Өөрчлөлт энэ хуудсанд түр хадгалагдаж, шинэчлэхэд арилна.</Banner>}
+    {source === "live" && <Banner>Зөвхөн харах горим. Эндээс засварлах боломж хараахан идэвхжээгүй.</Banner>}
+    {source === "offline" && <Banner>Backend сервер рүү хүрч чадсангүй. Сервер ажиллаж эхэлмэгц мэдээллийн сан энд харагдана.</Banner>}
+
+    {editable && editor !== undefined && <KnowledgeEditor key={editor?.id ?? "new"} item={editor} onCancel={closeEditor} onSave={(draft) => {
       const saved: KnowledgeItem = { ...draft, id: editor?.id ?? crypto.randomUUID(), updatedAt: new Date().toISOString() };
       setItems((current) => [...current.filter((item) => item.id !== saved.id), saved]);
-      setMessage("Туршилтын мэдээллийг хадгаллаа. Хуудас шинэчлэхэд өөрчлөлт арилна.");
+      setMessage("Жишээ мэдээллийг хадгаллаа.");
       reset(); closeEditor();
     }} />}
-    <section className="panel" aria-labelledby="knowledge-title">
-      <div className="panel-heading"><div><p className="eyebrow">БИЗНЕСИЙН МЭДЭЭЛЭЛ</p><h2 id="knowledge-title" ref={listTitle} tabIndex={-1}>Бүх мэдээлэл</h2></div><button type="button" className="calls-button knowledge-save" disabled={!isDemo || editor !== undefined} onClick={() => { setMessage(""); setEditor(null); }}>Мэдээлэл нэмэх</button></div>
-      <div className="calls-filters">
-        <label className="calls-search">Гарчиг, агуулга эсвэл ID<input type="search" value={query} placeholder="Мэдээлэл хайх" disabled={!items.length} onChange={(event) => setQuery(event.target.value)} /></label>
-        <label>Ангиллаар шүүх<select value={category} disabled={!items.length} onChange={(event) => setCategory(event.target.value)}>
-          <option value="">Бүх ангилал</option>{Object.entries(knowledgeCategories).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-        </select></label>
-        <label>Төлөв<select value={status} disabled={!items.length} onChange={(event) => setStatus(event.target.value)}><option value="">Бүх төлөв</option><option value="active">Баталгаажсан</option><option value="draft">Ноорог</option></select></label>
-        <button className="calls-button" type="button" disabled={!query && !category && !status} onClick={reset}>Цэвэрлэх</button>
-      </div>
-      {isDemo && <p className="calls-count" role="status">{message && `${message} `}{items.length} мэдээллээс {filtered.length} харагдаж байна</p>}
-      {filtered.length > 0 ? <div className="knowledge-list">{filtered.map((item) => <article className="knowledge-card" key={item.id} aria-labelledby={`knowledge-${item.id}`}>
-        <div className="knowledge-meta"><span>{knowledgeCategories[item.category]}</span><span className={`call-status ${item.active ? "call-status-completed" : "call-status-handed_off"}`}>{item.active ? "Баталгаажсан" : "Ноорог"}</span></div>
-        <h3 id={`knowledge-${item.id}`}>{item.title}</h3><p className="knowledge-content">{item.content}</p>
-        <p className="knowledge-price">{item.price === undefined ? "Үнэ оруулаагүй" : `${item.price} ₮`}</p>
-        <p className="knowledge-updated">Шинэчилсэн · <time dateTime={item.updatedAt}>{formatUlaanbaatarTime(item.updatedAt)}</time> · УБ</p>
-        <div className="knowledge-actions">
-          <button className="calls-button" type="button" disabled={!isDemo || editor !== undefined} onClick={() => { setMessage(""); setEditor(item); }}>Засах<span className="sr-only"> {item.title}</span></button>
-          <button className="calls-button knowledge-delete" type="button" disabled={!isDemo || editor !== undefined} onClick={() => {
-            if (!isDemo || !window.confirm(`“${item.title}” мэдээллийг туршилтын жагсаалтаас устгах уу?`)) return;
-            setItems((current) => current.filter((entry) => entry.id !== item.id));
-            setMessage("Туршилтын мэдээллийг устгалаа."); listTitle.current?.focus();
-          }}>Устгах<span className="sr-only"> {item.title}</span></button>
+
+    <section className="card" aria-labelledby="knowledge-title">
+      <div className="toolbar">
+        <h2 className="sr-only" id="knowledge-title" ref={listTitle} tabIndex={-1}>Бүх мэдээлэл</h2>
+        <label className="search"><span className="sr-only">Гарчиг эсвэл агуулга</span><Icon name="search" size={15} />
+          <input className="input" type="search" value={query} placeholder="Мэдээлэл хайх" disabled={!items.length} onChange={(event) => setQuery(event.target.value)} /></label>
+        <div className="segmented" role="group" aria-label="Төлөвөөр шүүх">
+          {STATUS_FILTERS.map((filter) => <button type="button" key={filter.value} aria-pressed={status === filter.value} disabled={!items.length} onClick={() => setStatus(filter.value)}>{filter.label}</button>)}
         </div>
-      </article>)}</div> : <div className="empty-state"><h3>{items.length ? "Тохирох мэдээлэл олдсонгүй" : "Мэдээлэл хараахан алга"}</h3><p>{items.length ? "Хайлт, ангилал эсвэл төлөвийн шүүлтүүрээ цэвэрлээрэй." : isDemo ? "Шинэ жишээ мэдээлэл нэмээд туршиж үзээрэй." : "Мэдээллийн сан холбогдсоны дараа энд харагдана."}</p>{items.length > 0 && <button className="calls-button" type="button" onClick={reset}>Бүх мэдээллийг харах</button>}</div>}
-      <p className="connection-note">AI ашиглах мэдээллийг хүн нягталж баталгаажуулна. Ноорог мэдээлэл баталгаажаагүй байна.</p>
+        <span className="card-meta toolbar-end" role="status">{message && message + " "}{items.length} мэдээллээс {filtered.length}</span>
+      </div>
+      {sections.length > 0 ? sections.map(({ category, rows }) => <div key={category}>
+        <h3 className="day-head">{knowledgeCategories[category]}<span>{rows.length}</span></h3>
+        <ul className="kb-rows">
+          {rows.map((item) => <li key={item.id}>
+            <div className="kb-main">
+              <p className="kb-title">{item.title}{!item.active && <span className="badge">Ноорог</span>}</p>
+              <p className="kb-content">{item.content}</p>
+            </div>
+            {item.price !== undefined && <p className="kb-price">{item.price.toLocaleString("en-US")} ₮</p>}
+            {editable && <div className="kb-actions">
+              <button className="btn btn-sm" type="button" disabled={editor !== undefined} onClick={() => { setMessage(""); setEditor(item); }}>Засах<span className="sr-only"> {item.title}</span></button>
+              <button className="btn btn-sm btn-danger" type="button" disabled={editor !== undefined} onClick={() => {
+                if (!window.confirm("“" + item.title + "” мэдээллийг жишээ жагсаалтаас устгах уу?")) return;
+                setItems((current) => current.filter((entry) => entry.id !== item.id));
+                setMessage("Жишээ мэдээллийг устгалаа."); listTitle.current?.focus();
+              }}>Устгах<span className="sr-only"> {item.title}</span></button>
+            </div>}
+          </li>)}
+        </ul>
+      </div>) : <Empty title={items.length ? "Тохирох мэдээлэл олдсонгүй" : "Мэдээлэл хараахан алга"}
+        text={items.length ? "Хайлт эсвэл төлөвийн шүүлтүүрээ цэвэрлээрэй." : "Бизнесийн мэдээлэл нэмэгдмэгц энд харагдана."}>
+        {items.length > 0 && <button className="btn" type="button" onClick={reset}>Шүүлтүүр цэвэрлэх</button>}
+      </Empty>}
+      <p className="card-footer">AI зөвхөн баталгаажсан мэдээллийг ашиглана. Ноорог мэдээлэл хариултад орохгүй.</p>
     </section>
   </>;
 }

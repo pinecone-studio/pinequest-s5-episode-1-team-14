@@ -19,9 +19,9 @@ export default function KnowledgeEditor({ item, onSave, onCancel }: {
   useEffect(() => { titleInput.current?.focus(); }, []);
   function resetApproval() { setActive(false); setError(""); }
 
-  return <section className="panel knowledge-editor" aria-labelledby="editor-title">
-    <div className="panel-heading"><div><p className="eyebrow">ТУРШИЛТЫН ЗАСВАР</p><h2 id="editor-title">{item ? "Мэдээлэл засах" : "Мэдээлэл нэмэх"}</h2></div></div>
-    <form className="knowledge-form" aria-labelledby="editor-title" onSubmit={(event) => {
+  return <section className="card section-below" aria-labelledby="editor-title">
+    <div className="card-header"><h2 className="card-title" id="editor-title">{item ? "Мэдээлэл засах" : "Мэдээлэл нэмэх"}</h2><span className="card-meta">Жишээ горим</span></div>
+    <form className="form" aria-labelledby="editor-title" onSubmit={(event) => {
       event.preventDefault();
       const amount = price.trim() === "" ? undefined : Number(price);
       if (!title.trim() || !content.trim() || !Object.hasOwn(knowledgeCategories, category)) {
@@ -32,16 +32,16 @@ export default function KnowledgeEditor({ item, onSave, onCancel }: {
       }
       onSave({ title: title.trim(), content: content.trim(), category, active, ...(amount === undefined ? {} : { price: amount }) });
     }}>
-      <label className="knowledge-wide">Гарчиг<input ref={titleInput} required value={title} onChange={(event) => { setTitle(event.target.value); resetApproval(); }} /></label>
-      <label>Ангилал<select value={category} onChange={(event) => { setCategory(event.target.value as KnowledgeItem["category"]); resetApproval(); }}>
+      <label className="field field-wide">Гарчиг<input className="input" ref={titleInput} required value={title} onChange={(event) => { setTitle(event.target.value); resetApproval(); }} /></label>
+      <label className="field">Ангилал<select className="input" value={category} onChange={(event) => { setCategory(event.target.value as KnowledgeItem["category"]); resetApproval(); }}>
         {Object.entries(knowledgeCategories).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select></label>
-      <label>Үнэ (₮, заавал биш)<input type="number" min="0" step="any" value={price} onChange={(event) => { setPrice(event.target.value); resetApproval(); }} /></label>
-      <label className="knowledge-wide">Агуулга<textarea required rows={4} value={content} onChange={(event) => { setContent(event.target.value); resetApproval(); }} /></label>
-      <p className="knowledge-help knowledge-wide">Шинэ болон засварласан мэдээлэл ноорог байна. Агуулга, ангилал эсвэл үнэ өөрчлөгдвөл дахин нягталж баталгаажуулна уу.</p>
-      <label className="knowledge-approval knowledge-wide"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} />Мэдээллийг нягталж, баталгаажуулах (туршилт)</label>
-      {error && <p className="knowledge-error knowledge-wide" role="alert">{error}</p>}
-      <div className="knowledge-actions knowledge-wide"><button className="calls-button knowledge-save" type="submit">Туршилтад хадгалах</button><button className="calls-button" type="button" onClick={onCancel}>Болих</button></div>
+      <label className="field">Үнэ (₮, заавал биш)<input className="input" type="number" min="0" step="any" value={price} onChange={(event) => { setPrice(event.target.value); resetApproval(); }} /></label>
+      <label className="field field-wide">Агуулга<textarea className="input textarea" required rows={4} value={content} onChange={(event) => { setContent(event.target.value); resetApproval(); }} /></label>
+      <label className="check field-wide"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} />
+        <span>Мэдээллийг нягталж, баталгаажуулах<small>Агуулга, ангилал эсвэл үнэ өөрчлөгдвөл дахин баталгаажуулна.</small></span></label>
+      {error && <p className="form-error field-wide" role="alert">{error}</p>}
+      <div className="form-actions field-wide"><button className="btn btn-primary" type="submit">Хадгалах</button><button className="btn" type="button" onClick={onCancel}>Болих</button></div>
     </form>
   </section>;
 }

@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
-import Script from "next/script";
-import "../public/theme.css";
+import { Inter } from "next/font/google";
 import "./globals.css";
+
+// Монгол кирилл (Ө, Ү) нь cyrillic-ext дэд багцад байдаг.
+const inter = Inter({ subsets: ["latin", "cyrillic", "cyrillic-ext"], variable: "--font-sans", display: "swap" });
 
 export const metadata: Metadata = {
   title: "AI Front-Desk Mongolia",
@@ -14,11 +16,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="mn" suppressHydrationWarning>
-      <body>
-        {children}
-        <Script src="/theme-init.js" strategy="beforeInteractive" />
-      </body>
+    <html lang="mn" className={inter.variable}>
+      <body>{children}</body>
     </html>
   );
 }
