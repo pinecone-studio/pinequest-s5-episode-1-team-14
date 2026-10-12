@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
 import { WebSocketServer } from "ws";
 import { buildMediaStreamTwiml, handleTwilioMediaStream, resolveCallerPhone } from "./telephony/twilio.js";
@@ -6,8 +7,27 @@ import { isValidTwilioSignature } from "./telephony/twilioSignature.js";
 import { issueStreamToken } from "./telephony/streamTokens.js";
 import { CALL_GREETING } from "./ai/callPrompt.js";
 import { cachedUlaw8k } from "./voice/elevenlabs.js";
+import { CallSessionStore } from "./calls/store.js";
+import { TranscriptStore } from "./calls/transcript.js";
+import { BusinessKnowledgeStore } from "./knowledge/store.js";
+import { listBookings } from "./calendar/googleCalendar.js";
 
 const PORT = Number(process.env.PORT ?? 8080);
+
+// Хянах самбарын (PWA) зөвхөн унших өгөгдөл.
+const DASHBOARD_ROUTES: Record<string, () => unknown> = {
+  "/api/calls": () => new CallSessionStore().list(),
+  "/api/transcripts": () => new TranscriptStore().all(),
+  "/api/knowledge": () => new BusinessKnowledgeStore().list({ activeOnly: false }),
+  "/api/bookings": () => listBookings(),
+};
+
+function hasDashboardToken(req: IncomingMessage): boolean {
+  const expected = process.env.DASHBOARD_API_TOKEN;
+  if (!expected) return false;
+  const digest = (value: string) => createHash("sha256").update(value).digest();
+  return timingSafeEqual(digest(req.headers.authorization ?? ""), digest(`Bearer ${expected}`));
+}
 
 async function readBody(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
@@ -57,6 +77,31 @@ const server = createServer(async (req, res) => {
   if (req.method === "GET" && req.url === "/health") {
     res.writeHead(200, { "Content-Type": "text/plain" });
     res.end("ok");
+    return;
+  }
+
+  if (req.method === "GET" && req.url?.startsWith("/api/")) {
+    // Харилцагчийн нэр, утас агуулдаг тул сервер ngrok-оор нээлттэй үед ч token-гүйгээр уншуулахгүй.
+    if (!hasDashboardToken(req)) {
+      res.writeHead(401);
+      res.end();
+      return;
+    }
+    const load = DASHBOARD_ROUTES[req.url];
+    if (!load) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    try {
+      const body = JSON.stringify(await load());
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(body);
+    } catch (error) {
+      console.error(`[api] ${req.url} алдаа:`, error instanceof Error ? error.message : error);
+      res.writeHead(502);
+      res.end();
+    }
     return;
   }
 

@@ -73,11 +73,11 @@ function serviceDuration(value: unknown): number {
   return value;
 }
 
-function calendarClient(write = false): { auth: JWT; calendarId: string } {
+function calendarClient(access: "freebusy" | "readonly" | "write" = "freebusy"): { auth: JWT; calendarId: string } {
   const email = requiredEnv("GOOGLE_CALENDAR_CLIENT_EMAIL");
   const key = requiredEnv("GOOGLE_CALENDAR_PRIVATE_KEY").replace(/\\n/g, "\n");
   const calendarId = requiredEnv("GOOGLE_CALENDAR_ID");
-  const scope = `https://www.googleapis.com/auth/calendar.events${write ? "" : ".freebusy"}`;
+  const scope = `https://www.googleapis.com/auth/calendar.events${access === "write" ? "" : `.${access}`}`;
   let auth = calendarClients.get(scope);
   if (!auth || auth.email !== email || auth.key !== key) {
     auth = new JWT({ email, key, scopes: [scope], transporterOptions: { timeout: 10000, retry: false } });
@@ -199,7 +199,7 @@ export async function createAppointment(input: AppointmentRequest): Promise<Book
     ...properties, id, calendarEventId: id, startTime: new Date(start).toISOString(),
     endTime: new Date(end).toISOString(), durationMinutes, status: "confirmed",
   };
-  const { auth, calendarId } = calendarClient(true);
+  const { auth, calendarId } = calendarClient("write");
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
   const verify = (value: unknown): Booking => {
     const event = record(value);
@@ -250,5 +250,56 @@ export async function createAppointment(input: AppointmentRequest): Promise<Book
     return verify(event);
   });
   bookingQueue = result.then(() => undefined, () => undefined);
+  // Шинэ захиалга хянах самбарт шууд харагдахын тулд жагсаалтын кэшийг цэвэрлэнэ.
+  result.then(() => { bookingList = undefined; }, () => undefined);
   return result;
+}
+
+const BOOKING_LIST_TTL_MS = 15000;
+const BOOKING_LIST_PAST_MS = 30 * 86400000;
+let bookingList: { at: number; bookings: Promise<Booking[]> } | undefined;
+
+function toBooking(value: unknown): Booking | null {
+  try {
+    const event = record(value);
+    const metadata = record(record(event.extendedProperties).private);
+    const start = providerTime(record(event.start).dateTime);
+    const end = providerTime(record(event.end).dateTime);
+    if (typeof event.id !== "string" || event.status !== "confirmed" || end <= start) return null;
+    return {
+      id: event.id, calendarEventId: event.id,
+      customerName: bookingText(metadata.customerName, "customerName"), phone: bookingText(metadata.phone, "phone"),
+      serviceId: bookingText(metadata.serviceId, "serviceId"), serviceName: bookingText(metadata.serviceName, "serviceName"),
+      startTime: new Date(start).toISOString(), endTime: new Date(end).toISOString(),
+      durationMinutes: Math.round((end - start) / 60000), status: "confirmed", source: "AI_PHONE_AGENT",
+    };
+  } catch {
+    return null; // Гараар зассан, бүтэц нь эвдэрсэн эвент жагсаалтыг бүхэлд нь унагаахгүй.
+  }
+}
+
+// AI-ийн үүсгэсэн захиалгууд (сүүлийн 30 хоног ба ирээдүй), эхлэх цагаар өсөх дарааллаар.
+// ponytail: 15 секундийн кэш, эхний 250 эвент; олон захиалгатай болвол хуудаслана.
+export function listBookings(): Promise<Booking[]> {
+  if (bookingList && Date.now() - bookingList.at < BOOKING_LIST_TTL_MS) return bookingList.bookings;
+  const { auth, calendarId } = calendarClient("readonly");
+  const bookings = auth.request<unknown>({
+    url: `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+    method: "GET", timeout: 10000, retry: false,
+    params: {
+      privateExtendedProperty: "source=AI_PHONE_AGENT", singleEvents: true, orderBy: "startTime", maxResults: 250,
+      timeMin: new Date(Date.now() - BOOKING_LIST_PAST_MS).toISOString(),
+    },
+  }).then(({ data }) => {
+    const items = record(data).items;
+    if (!Array.isArray(items)) throw new TypeError("Google Calendar response is missing events");
+    return items.map(toBooking).filter((booking): booking is Booking => booking !== null);
+  }, () => {
+    // SDK errors can contain request headers/tokens; never expose them to callers.
+    throw new Error("Google Calendar booking list request failed");
+  });
+  const entry = { at: Date.now(), bookings };
+  bookingList = entry;
+  bookings.catch(() => { if (bookingList === entry) bookingList = undefined; });
+  return bookings;
 }

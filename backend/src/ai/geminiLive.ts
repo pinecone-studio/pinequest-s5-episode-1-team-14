@@ -82,12 +82,16 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<unk
 export type GeminiLiveCallbacks = {
   onOpen?: () => void;
   onText?: (text: string) => void;
+  // Дуудагчийн ярианы бичвэр (хэсэг хэсгээр ирнэ) — дуудлагын түүхэнд хадгалахад.
+  onCallerText?: (text: string) => void;
   onTurnComplete?: () => void;
   // Gemini-ийн өөрийн дуу: 24kHz, 16-bit little-endian PCM.
   onAudio?: (pcm24k: Buffer) => void;
   // Дуудагч AI-г таслан орж ярихад Gemini-ийн дотоод VAD илрүүлээд дуудна —
   // тоглуулж буй/дараалалд буй хариултыг шууд зогсоох дохио.
   onInterrupted?: () => void;
+  // Function бүр ажилласны дараа — дуудлагыг захиалга, зорилготой нь холбоход.
+  onToolResult?: (name: string, result: unknown) => void;
   onError?: (message: string) => void;
   onClose?: (reason: string) => void;
 };
@@ -111,6 +115,9 @@ export async function createGeminiLiveSession(
     config: {
       responseModalities: [Modality.AUDIO],
       outputAudioTranscription: {},
+      // languageCodes-ийг Gemini Developer API дэмждэггүй (холболт унагаана) тул хэлийг
+      // загвар өөрөө танина — монгол яриаг хааяа өөр хэлээр буруу бичиж болно.
+      inputAudioTranscription: {},
       systemInstruction,
       tools: TOOLS,
     },
@@ -120,6 +127,8 @@ export async function createGeminiLiveSession(
         if (process.env.DEBUG_GEMINI) console.debug("[gemini]", JSON.stringify(message));
         const text = message.serverContent?.outputTranscription?.text;
         if (text) callbacks.onText?.(text);
+        const heard = message.serverContent?.inputTranscription?.text;
+        if (heard) callbacks.onCallerText?.(heard);
         if (callbacks.onAudio) {
           for (const part of message.serverContent?.modelTurn?.parts ?? []) {
             if (part.inlineData?.data) callbacks.onAudio(Buffer.from(part.inlineData.data, "base64"));
@@ -132,6 +141,7 @@ export async function createGeminiLiveSession(
           const functionResponses = [];
           for (const call of message.toolCall.functionCalls) {
             const result = await runTool(call.name ?? "", (call.args ?? {}) as Record<string, unknown>);
+            callbacks.onToolResult?.(call.name ?? "", result);
             functionResponses.push({ name: call.name, id: call.id, response: { result } });
           }
           session.sendToolResponse({ functionResponses });
