@@ -1,18 +1,21 @@
 // Twilio Media Streams <-> Gemini Live bridge. Дуудлагын 8kHz mu-law
-// аудиог 16kHz PCM болгож Gemini рүү, Gemini-ийн текстийг ElevenLabs-аар
-// 8kHz mu-law болгож буцаан Twilio руу явуулна.
+// аудиог 16kHz PCM болгож Gemini рүү явуулна. Хариуг VOICE_MODE-оор сонгоно:
+// анхдагч нь Gemini-ийн текстийг ElevenLabs-аар 8kHz mu-law болгох;
+// "gemini" бол Gemini-ийн өөрийн 24kHz аудиог 8kHz mu-law болгож шууд дамжуулна
+// (ElevenLabs-ийн алхамгүй тул хурдан, гэхдээ хувилсан дуу хоолой биш).
 
 import type { WebSocket, RawData } from "ws";
 import { createGeminiLiveSession } from "../ai/geminiLive.js";
 import { CALL_GREETING } from "../ai/callPrompt.js";
-import { synthesizeToUlaw8k } from "../voice/elevenlabs.js";
+import { streamUlaw8k } from "../voice/elevenlabs.js";
 import { CallSessionStore } from "../calls/store.js";
 import { takeSentences } from "./sentences.js";
 
 const MULAW_BIAS = 0x84;
 const MULAW_CLIP = 32635;
-const FRAME_BYTES = 160; // 8kHz mu-law дээр 20мс
-const FRAME_MS = 20;
+// Дуудагч ярьж байна гэж үзэх дууны түвшин — зөвхөн хариултын хугацааг
+// хэмжих лог-д ашиглана.
+const CALLER_VOICE_RMS = 500;
 const PHONE_PATTERN = /^(?:\d{8}|\+[1-9]\d{7,14})$/;
 
 function linearToMuLaw(sampleIn: number): number {
@@ -62,6 +65,28 @@ export function upsample8kTo16k(samples: Int16Array): Int16Array {
   return out;
 }
 
+// Gemini-ийн 24kHz PCM-ийг утасны 8kHz рүү буулгана: гурван дээжийн дундаж.
+// Chunk нь 3 дээжийн хилээр таслагдаагүй байж болох тул үлдэгдэл байтыг
+// дараагийн chunk-т залгана — дуудлага бүрт нэг хувиргагч үүсгэнэ.
+export function createDownsampler24kTo8k(): (pcm24k: Buffer) => Int16Array {
+  let carry: Buffer = Buffer.alloc(0);
+  return (pcm24k) => {
+    const data = carry.length ? Buffer.concat([carry, pcm24k]) : pcm24k;
+    const out = new Int16Array(Math.floor(data.length / 6));
+    for (let i = 0; i < out.length; i++) {
+      out[i] = Math.round((data.readInt16LE(i * 6) + data.readInt16LE(i * 6 + 2) + data.readInt16LE(i * 6 + 4)) / 3);
+    }
+    carry = Buffer.from(data.subarray(out.length * 6));
+    return out;
+  };
+}
+
+function rootMeanSquare(samples: Int16Array): number {
+  let sumSquares = 0;
+  for (const sample of samples) sumSquares += sample * sample;
+  return samples.length ? Math.sqrt(sumSquares / samples.length) : 0;
+}
+
 function normalizePhone(value: unknown): string | null {
   return typeof value === "string" && PHONE_PATTERN.test(value) ? value : null;
 }
@@ -93,19 +118,42 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
   let speakQueue: Promise<void> = Promise.resolve();
   let geminiSession: Awaited<ReturnType<typeof createGeminiLiveSession>> | null = null;
   let closed = false;
+  let callerSpokeAt = 0;
+  let awaitingReply = false;
+  const nativeVoice = process.env.VOICE_MODE === "gemini";
+  const downsample = createDownsampler24kTo8k();
 
+  // Дуудагч сүүлд дуугарснаас хариултын эхний аудио гарах хүртэлх хугацааг
+  // эргэлт бүрт нэг удаа лог-д бичнэ — горим, загваруудыг харьцуулахад.
+  function sendAudio(ulaw: Uint8Array): void {
+    if (awaitingReply) {
+      awaitingReply = false;
+      console.log(`[latency] хариултын эхний аудио: ${Date.now() - callerSpokeAt}мс (${nativeVoice ? "gemini" : "elevenlabs"})`);
+    }
+    ws.send(JSON.stringify({ event: "media", streamSid, media: { payload: Buffer.from(ulaw).toString("base64") } }));
+  }
+
+  // Аудиог ирэх тусам нь хүлээлгүй явуулна — Twilio өөрөө буферлээд бодит
+  // хурдаар тоглуулдаг тул 20мс-ийн таймер хэрэггүй.
   async function speak(text: string): Promise<void> {
     if (closed || !text.trim()) return;
-    const audio = await synthesizeToUlaw8k(text);
-    for (let offset = 0; offset < audio.length && !closed; offset += FRAME_BYTES) {
-      const frame = audio.subarray(offset, offset + FRAME_BYTES);
-      ws.send(JSON.stringify({ event: "media", streamSid, media: { payload: frame.toString("base64") } }));
-      await new Promise((resolve) => setTimeout(resolve, FRAME_MS));
+    for await (const chunk of await streamUlaw8k(text)) {
+      if (closed) return;
+      sendAudio(chunk);
     }
   }
 
   function enqueueSpeak(text: string): void {
     speakQueue = speakQueue.then(() => speak(text)).catch((error) => console.error("[twilio] ярих алдаа:", error));
+  }
+
+  function onGeminiAudio(pcm24k: Buffer): void {
+    if (!closed) sendAudio(encodeMuLaw(downsample(pcm24k)));
+  }
+
+  // Twilio-д буферлэгдсэн, хараахан тоглоогүй аудиог хаяна.
+  function onInterrupted(): void {
+    if (!closed && streamSid) ws.send(JSON.stringify({ event: "clear", streamSid }));
   }
 
   function onText(delta: string): void {
@@ -142,20 +190,26 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
         const callerPhone = normalizePhone(message.start.customParameters?.callerPhone);
         store.start({ id: callId, callerPhone, startedAt: new Date().toISOString() });
         // Gemini холбогдох хооронд дуудагч чимээгүй хүлээхгүйн тулд эхэлж мэндэлнэ.
-        enqueueSpeak(CALL_GREETING);
+        if (!nativeVoice) enqueueSpeak(CALL_GREETING);
         geminiSession = await createGeminiLiveSession({
-          onText,
-          onTurnComplete,
+          ...(nativeVoice ? { onAudio: onGeminiAudio, onInterrupted } : { onText, onTurnComplete }),
           onError: (msg) => console.error("[twilio] Gemini алдаа:", msg),
           onClose: endCall,
-        }, { callerPhone });
+        }, { callerPhone, greeted: !nativeVoice });
+        // Gemini-ийн дуугаар мэндлүүлэхийн тулд эхний эргэлтийг өдөөнө.
+        if (nativeVoice) geminiSession.sendRealtimeInput({ text: "(Дуудлага холбогдлоо.)" });
         return;
       }
 
       if (message.event === "media") {
         if (!geminiSession) return;
         const ulaw = Buffer.from(message.media.payload, "base64");
-        const pcm16k = upsample8kTo16k(decodeMuLaw(ulaw));
+        const pcm8k = decodeMuLaw(ulaw);
+        if (rootMeanSquare(pcm8k) > CALLER_VOICE_RMS) {
+          callerSpokeAt = Date.now();
+          awaitingReply = true;
+        }
+        const pcm16k = upsample8kTo16k(pcm8k);
         geminiSession.sendRealtimeInput({
           audio: { data: Buffer.from(pcm16k.buffer).toString("base64"), mimeType: "audio/pcm;rate=16000" },
         });

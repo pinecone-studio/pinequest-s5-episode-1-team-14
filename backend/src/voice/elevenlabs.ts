@@ -1,11 +1,11 @@
 // ElevenLabs TTS эзэмшигчийн хувилсан дуу хоолойгоор. Gemini-ийн текст
-// хариултыг аваад, Twilio руу шууд явуулах боломжтой 8kHz mu-law аудио
-// (Buffer) болгон буцаана — дахин sample rate хөрвүүлэх шаардлагагүй.
+// хариултыг Twilio руу шууд явуулах боломжтой 8kHz mu-law аудио болгон
+// ирэх тусам нь урсгаж өгнө — дахин sample rate хөрвүүлэх шаардлагагүй.
 
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
 import { getActiveVoiceId } from "./settings.js";
 
-const MODEL_ID = "eleven_v4";
+const DEFAULT_MODEL_ID = "eleven_v4";
 
 let client: ElevenLabsClient | null = null;
 
@@ -17,18 +17,13 @@ function getClient(): ElevenLabsClient {
   return client;
 }
 
-async function collectStream(stream: AsyncIterable<Uint8Array>): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
-  return Buffer.concat(chunks);
-}
-
-// Twilio Media Stream-д шууд явуулах 8kHz mu-law аудио үүсгэнэ.
-export async function synthesizeToUlaw8k(text: string): Promise<Buffer> {
-  const stream = await getClient().textToSpeech.convert(getActiveVoiceId(), {
+// Эхний chunk бэлэн болмогц дуудагчид сонсогдож эхэлнэ; бүтэн өгүүлбэрийг
+// хүлээхгүй. ELEVENLABS_MODEL_ID-ээр загварыг (жишээ нь eleven_v4_turbo)
+// код өөрчлөхгүйгээр сольж харьцуулна.
+export function streamUlaw8k(text: string): Promise<AsyncIterable<Uint8Array>> {
+  return getClient().textToSpeech.stream(getActiveVoiceId(), {
     text,
-    modelId: MODEL_ID,
+    modelId: process.env.ELEVENLABS_MODEL_ID || DEFAULT_MODEL_ID,
     outputFormat: "ulaw_8000",
   });
-  return collectStream(stream);
 }

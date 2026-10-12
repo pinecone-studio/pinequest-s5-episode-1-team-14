@@ -34,6 +34,8 @@ const clock = new Intl.DateTimeFormat("en-CA", {
 export function buildSystemInstruction(input: {
   knowledge: readonly KnowledgeItem[];
   callerPhone?: string | null;
+  // false: мэндчилгээг систем тоглуулаагүй, загвар өөрөө эхэлж хэлнэ.
+  greeted?: boolean;
   now?: Date;
 }): string {
   const p = Object.fromEntries(clock.formatToParts(input.now ?? new Date()).map(({ type, value }) => [type, value]));
@@ -41,7 +43,9 @@ export function buildSystemInstruction(input: {
     PERSONA_INSTRUCTION,
     `Одоо ${p.year}-${p.month}-${p.day} (${WEEKDAYS[p.weekday]} гараг) ${p.hour}:${p.minute}, Улаанбаатарын цаг (+08:00).
 "Өнөөдөр", "маргааш", гарагийн нэр зэргийг энэ огнооноос тооцоол.`,
-    `Дуудлагын эхэнд систем чиний өмнөөс "${CALL_GREETING}" гэж аль хэдийн мэндэлсэн.
+    input.greeted === false
+      ? `Дуудлага холбогдмогц хамгийн түрүүнд "${CALL_GREETING}" гэж нэг удаа мэндэл.`
+      : `Дуудлагын эхэнд систем чиний өмнөөс "${CALL_GREETING}" гэж аль хэдийн мэндэлсэн.
 Дахин бүү мэндэл, өөрийгөө дахин бүү танилцуул.`,
   ];
   if (input.callerPhone) {
