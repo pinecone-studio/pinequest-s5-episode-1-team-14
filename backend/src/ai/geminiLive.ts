@@ -85,7 +85,8 @@ export type GeminiLiveCallbacks = {
   onTurnComplete?: () => void;
   // Gemini-ийн өөрийн дуу: 24kHz, 16-bit little-endian PCM.
   onAudio?: (pcm24k: Buffer) => void;
-  // Дуудагч таслан ярихад Gemini-ийн VAD илрүүлнэ — тоглуулж буйг зогсоох дохио.
+  // Дуудагч AI-г таслан орж ярихад Gemini-ийн дотоод VAD илрүүлээд дуудна —
+  // тоглуулж буй/дараалалд буй хариултыг шууд зогсоох дохио.
   onInterrupted?: () => void;
   onError?: (message: string) => void;
   onClose?: (reason: string) => void;
