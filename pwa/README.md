@@ -1,29 +1,24 @@
 # Landing page and dashboard
 
-`/` serves the approved [PR #14 landing page](https://github.com/pinecone-studio/pinequest-s5-episode-1-team-14/pull/14).
-Its source lives in `public/landing/`; a Next.js rewrite serves the standalone
-HTML with its own layout and scripts. The hero's
-dashboard link opens `/dashboard`. See [landing setup](docs/landing.md) for files,
-demo placeholders and external Tailwind CDN/Google Fonts requirements.
+`/` is the landing page (`app/page.tsx`, styles in `app/landing.css`). It is a
+regular Next.js page that shares the dashboard's fonts, logo and color tokens.
+The sample conversation in the hero is labelled as an example and never calls
+the backend. Set `NEXT_PUBLIC_DEMO_NUMBER` in the deployment environment to show
+a "call to try" button; when it is empty the page links to the dashboard
+instead. Do not commit a real phone number.
 
-`/dashboard` opens the dashboard. The `(workspace)` route group shares the top
-navigation, header and content frame across Dashboard, Calls, Bookings, Knowledge
-and Analytics. Navigation labels are Mongolian. Future
-Demo and Settings sections are visibly disabled
-until their own feature PRs add working routes.
+`/dashboard` opens the dashboard. The `(workspace)` route group shares the
+sidebar shell across Overview, Calls, Bookings, Knowledge and Analytics. Labels
+are Mongolian. Demo and Settings are visibly disabled until they have routes.
 
-The overview currently shows empty metrics/activity and unknown connection
-states. It does not read backend data or imply that an integration is online.
-Keep actual data loading, authentication and remaining feature pages in separate PRs.
+The dashboard reads calls, transcripts, bookings and knowledge from the backend
+(`BACKEND_API_URL`, `BACKEND_API_TOKEN` in `pwa/.env.local`) and refreshes every
+two seconds. Each page shows whether its data is live, sample or offline. Set
+`NEXT_PUBLIC_USE_MOCK_API=true` to use clearly labelled sample data instead.
+The dashboard has no login yet; add one before exposing real caller data.
 
-Workspace styles use plain CSS and the landing's shared palette and Google Fonts
-(Manrope/Unbounded, with system fallbacks). `public/theme.css` is the single source
-for both documents' colors/fonts; `public/theme-init.js` restores the `theme`
-preference before rendering. The header button cycles automatic, light and dark
-modes; the same preference survives navigation between landing and workspace.
-If browser storage is unavailable, switching still works for the current document.
-Small screens use a native `details` menu, while a skip link, focus indicators and
-active-page semantics support keyboard users. No UI dependency is added.
+Styles are plain CSS in `app/globals.css` with one dark theme and the Inter font
+(`next/font`). No UI dependency is added.
 
 From the repository root:
 
@@ -46,8 +41,6 @@ $browserCheckDir = Join-Path $env:TEMP 'codex-pr11-browser-check'
 npm.cmd install --prefix $browserCheckDir --no-package-lock --ignore-scripts --no-audit --no-fund playwright-core@1.64.0
 $env:NODE_PATH = Join-Path $browserCheckDir 'node_modules'
 node pwa/scripts/check-dashboard.cjs
-node pwa/scripts/check-landing.cjs
-node pwa/scripts/check-workspace-theme.cjs
 ```
 
 `DASHBOARD_URL` optionally selects a different local server. The check verifies
@@ -55,13 +48,8 @@ direct dashboard access, keyboard focus, menu behavior, five viewport widths and
 errors. It also refreshes the review screenshots in `pwa/docs/`. This optional
 browser check is separate from the existing CI lint/build checks.
 
-The landing check covers `/`, local assets, theme persistence, demo dialogs,
-anchor navigation, reduced motion, five widths and the link into the dashboard.
-Landing screenshots are also written to `pwa/docs/`.
-
-The workspace theme check covers all five routes in dark mode, shared landing
-colors/fonts, theme persistence across navigation/reload, system preference,
-blocked browser storage and the mobile menu. It also saves dark-mode screenshots.
+The `check-*.cjs` scripts and the screenshots below predate the sidebar
+redesign and still expect the old layout; update them before relying on them.
 
 ![Desktop dashboard](docs/dashboard-desktop.png)
 ![Mobile dashboard](docs/dashboard-mobile.png)
