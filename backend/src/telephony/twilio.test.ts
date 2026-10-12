@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createDownsampler24kTo8k, decodeMuLaw, encodeMuLaw } from "./twilio.js";
+import { createDownsampler24kTo8k, decodeMuLaw, encodeMuLaw, resolveCallerPhone } from "./twilio.js";
 
 function pcm(samples: number[]): Buffer {
   const buffer = Buffer.alloc(samples.length * 2);
@@ -24,4 +24,15 @@ test("mu-law round trip stays close to the original samples", () => {
   samples.forEach((sample, index) => {
     assert.ok(Math.abs(decoded[index] - sample) <= Math.max(16, Math.abs(sample) * 0.05), `${sample} -> ${decoded[index]}`);
   });
+});
+
+test("caller phone is kept for real callers and dropped when forwarding hides it", () => {
+  const phone = (fields: Record<string, string>) => resolveCallerPhone(new URLSearchParams(fields));
+  assert.equal(phone({ From: "+97699112233", To: "+15005550006", ForwardedFrom: "+97677112233" }), "+97699112233");
+  assert.equal(phone({ From: "+97699112233", To: "+15005550006" }), "+97699112233");
+  // Оператор бизнесийн дугаарыг From-д тавьсан (форматаас үл хамааран таарна).
+  assert.equal(phone({ From: "+97677112233", To: "+15005550006", ForwardedFrom: "77112233" }), "");
+  assert.equal(phone({ From: "+15005550006", To: "+15005550006" }), "");
+  assert.equal(phone({ From: "anonymous", To: "+15005550006" }), "");
+  assert.equal(phone({ To: "+15005550006" }), "");
 });
