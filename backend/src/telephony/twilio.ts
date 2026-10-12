@@ -12,6 +12,18 @@ const MULAW_CLIP = 32635;
 const FRAME_BYTES = 160; // 8kHz mu-law дээр 20мс
 const FRAME_MS = 20;
 const PHONE_PATTERN = /^(?:\d{8}|\+[1-9]\d{7,14})$/;
+// Barge-in: Gemini-ийн "interrupted" дохио нь зөвхөн тухайн турш идэвхтэй
+// үүсгэгдэж байх үед л ирдэг (богино хариулт бол бидний тоглуулж дуусахаас
+// өмнө аль хэдийн turnComplete болчихсон байдаг) — иймд дуудагчийн дуу
+// хоолойн эрч хүчийг шууд хэмжиж, AI тоглуулж байх үед илрэвэл дотооддоо
+// давхар таслана.
+const BARGE_IN_RMS_THRESHOLD = 600;
+
+function rootMeanSquare(samples: Int16Array): number {
+  let sumSquares = 0;
+  for (const sample of samples) sumSquares += sample * sample;
+  return Math.sqrt(sumSquares / samples.length);
+}
 
 function linearToMuLaw(sampleIn: number): number {
   let sample = sampleIn;
@@ -90,21 +102,42 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
   let callId = "";
   let pendingText = "";
   let speakQueue: Promise<void> = Promise.resolve();
+  // Barge-in: таслагдах бүрт нэмэгдэнэ. Хуучин үеийн ярианы хэсгүүд энэ
+  // тоогоороо өөрийгөө хуучирсан гэж үзээд цааш тоглохгүй болно.
+  let speechGeneration = 0;
+  let aiSpeaking = false;
   let geminiSession: Awaited<ReturnType<typeof createGeminiLiveSession>> | null = null;
   let closed = false;
 
-  async function speak(text: string): Promise<void> {
-    if (closed || !text.trim()) return;
+  async function speak(text: string, generation: number): Promise<void> {
+    if (closed || generation !== speechGeneration || !text.trim()) return;
     const audio = await synthesizeToUlaw8k(text);
-    for (let offset = 0; offset < audio.length && !closed; offset += FRAME_BYTES) {
-      const frame = audio.subarray(offset, offset + FRAME_BYTES);
-      ws.send(JSON.stringify({ event: "media", streamSid, media: { payload: frame.toString("base64") } }));
-      await new Promise((resolve) => setTimeout(resolve, FRAME_MS));
+    if (closed || generation !== speechGeneration) return;
+    aiSpeaking = true;
+    try {
+      for (let offset = 0; offset < audio.length; offset += FRAME_BYTES) {
+        if (closed || generation !== speechGeneration) return;
+        const frame = audio.subarray(offset, offset + FRAME_BYTES);
+        ws.send(JSON.stringify({ event: "media", streamSid, media: { payload: frame.toString("base64") } }));
+        await new Promise((resolve) => setTimeout(resolve, FRAME_MS));
+      }
+    } finally {
+      if (generation === speechGeneration) aiSpeaking = false;
     }
   }
 
   function enqueueSpeak(text: string): void {
-    speakQueue = speakQueue.then(() => speak(text)).catch((error) => console.error("[twilio] ярих алдаа:", error));
+    const generation = speechGeneration;
+    speakQueue = speakQueue.then(() => speak(text, generation)).catch((error) => console.error("[twilio] ярих алдаа:", error));
+  }
+
+  // Дуудагч AI-г таслан орж ярихад: тоглуулж буй/дараалалд буй үгсийг хаяж,
+  // Twilio-д хараахан тоглоогүй аудиог нь цэвэрлэ (clear event — энэ бол
+  // Twilio-ийн barge-in-д зориулсан албан ёсны механизм).
+  function onInterrupted(): void {
+    speechGeneration++;
+    pendingText = "";
+    if (streamSid) ws.send(JSON.stringify({ event: "clear", streamSid }));
   }
 
   function onText(delta: string): void {
@@ -147,6 +180,7 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
         geminiSession = await createGeminiLiveSession({
           onText,
           onTurnComplete,
+          onInterrupted,
           onError: (msg) => console.error("[twilio] Gemini алдаа:", msg),
           onClose: endCall,
         });
@@ -156,7 +190,9 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
       if (message.event === "media") {
         if (!geminiSession) return;
         const ulaw = Buffer.from(message.media.payload, "base64");
-        const pcm16k = upsample8kTo16k(decodeMuLaw(ulaw));
+        const pcm8k = decodeMuLaw(ulaw);
+        if (aiSpeaking && rootMeanSquare(pcm8k) > BARGE_IN_RMS_THRESHOLD) onInterrupted();
+        const pcm16k = upsample8kTo16k(pcm8k);
         geminiSession.sendRealtimeInput({
           audio: { data: Buffer.from(pcm16k.buffer).toString("base64"), mimeType: "audio/pcm;rate=16000" },
         });
