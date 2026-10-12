@@ -13,3 +13,9 @@ next-env.d.ts
 coverage/
 /backend/data/
 .env*
+
+# Гараар турших явцад үүсдэг түр аудио гаралт
+backend/pipeline-output-*.mp3
+backend/tts-test-output.mp3
+backend/chat-output.mp3
+backend/voice-sample.*
