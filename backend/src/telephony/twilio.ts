@@ -10,12 +10,15 @@ import { CALL_GREETING } from "../ai/callPrompt.js";
 import { streamUlaw8k } from "../voice/elevenlabs.js";
 import { CallSessionStore } from "../calls/store.js";
 import { takeSentences } from "./sentences.js";
+import { consumeStreamToken } from "./streamTokens.js";
 
 const MULAW_BIAS = 0x84;
 const MULAW_CLIP = 32635;
 // Дуудагч ярьж байна гэж үзэх дууны түвшин — зөвхөн хариултын хугацааг
 // хэмжих лог-д ашиглана.
 const CALLER_VOICE_RMS = 500;
+// Холбогдоод энэ хугацаанд зөв "start" илгээгээгүй socket-ийг хаана.
+const START_TIMEOUT_MS = 10_000;
 const PHONE_PATTERN = /^(?:\d{8}|\+[1-9]\d{7,14})$/;
 // Barge-in: Gemini-ийн "interrupted" дохио нь зөвхөн тухайн турш идэвхтэй
 // үүсгэгдэж байх үед л ирдэг (богино хариулт бол бидний тоглуулж дуусахаас
@@ -196,9 +199,15 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
     pendingText = "";
   }
 
+  const startTimer = setTimeout(() => {
+    if (!streamSid) ws.close(1008, "start timeout");
+  }, START_TIMEOUT_MS);
+  startTimer.unref();
+
   function endCall(): void {
     if (closed) return;
     closed = true;
+    clearTimeout(startTimer);
     geminiSession?.close();
     if (callId) {
       try {
@@ -214,6 +223,12 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
       const message: TwilioStreamMessage = JSON.parse(raw.toString());
 
       if (message.event === "start") {
+        // Зөвхөн /voice-оос олгосон нэг удаагийн token-той, анхны start-ыг л хүлээн авна.
+        if (streamSid || !consumeStreamToken(message.start.customParameters?.streamToken)) {
+          console.error("[twilio] media stream-ийн token буруу эсвэл давхар start — холболтыг хаалаа");
+          ws.close(1008, "unauthorized");
+          return;
+        }
         streamSid = message.start.streamSid;
         callId = message.start.callSid;
         const callerPhone = normalizePhone(message.start.customParameters?.callerPhone);
