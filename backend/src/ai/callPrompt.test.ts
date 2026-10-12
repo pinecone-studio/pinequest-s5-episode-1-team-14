@@ -20,4 +20,7 @@ test("instruction omits the phone line for unknown callers and still grounds on 
   const text = buildSystemInstruction({ knowledge: [], callerPhone: null });
   assert.ok(!text.includes("Дуудагчийн утасны дугаар"));
   assert.ok(text.endsWith('{"approvedBusinessKnowledge":[]}'));
+  assert.ok(text.includes("аль хэдийн мэндэлсэн"));
+  const selfGreeting = buildSystemInstruction({ knowledge: [], greeted: false });
+  assert.ok(selfGreeting.includes("хамгийн түрүүнд") && !selfGreeting.includes("аль хэдийн мэндэлсэн"));
 });

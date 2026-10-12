@@ -2,8 +2,8 @@
 // calling-той. Бизнесийн мэдлэг system instruction-д бүхлээрээ орно
 // (callPrompt.ts). gemini-3.8-live нь responseModalities: TEXT дэмждэггүй
 // тул AUDIO + outputAudioTranscription ашиглаж, текстийг
-// serverContent.outputTranscription-ээс авна (аудиог үл хэрэгсэнэ, ElevenLabs
-// доод түвшинд бодит дуу хоолой гаргана).
+// serverContent.outputTranscription-ээс авна. Дуудагч талд ElevenLabs-аар
+// (onText) эсвэл Gemini-ийн өөрийн 24kHz аудиогоор (onAudio) дуу гаргана.
 
 import { GoogleGenAI, Modality, Type, type Tool } from "@google/genai";
 import { BusinessKnowledgeStore } from "../knowledge/store.js";
@@ -83,13 +83,17 @@ export type GeminiLiveCallbacks = {
   onOpen?: () => void;
   onText?: (text: string) => void;
   onTurnComplete?: () => void;
+  // Gemini-ийн өөрийн дуу: 24kHz, 16-bit little-endian PCM.
+  onAudio?: (pcm24k: Buffer) => void;
+  // Дуудагч таслан ярихад Gemini-ийн VAD илрүүлнэ — тоглуулж буйг зогсоох дохио.
+  onInterrupted?: () => void;
   onError?: (message: string) => void;
   onClose?: (reason: string) => void;
 };
 
 export async function createGeminiLiveSession(
   callbacks: GeminiLiveCallbacks,
-  context: { callerPhone?: string | null } = {},
+  context: { callerPhone?: string | null; greeted?: boolean } = {},
 ) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY тохируулаагүй байна");
@@ -98,6 +102,7 @@ export async function createGeminiLiveSession(
   const systemInstruction = buildSystemInstruction({
     knowledge: new BusinessKnowledgeStore().list({ activeOnly: true }),
     callerPhone: context.callerPhone,
+    greeted: context.greeted,
   });
 
   const session = await ai.live.connect({
@@ -114,6 +119,12 @@ export async function createGeminiLiveSession(
         if (process.env.DEBUG_GEMINI) console.debug("[gemini]", JSON.stringify(message));
         const text = message.serverContent?.outputTranscription?.text;
         if (text) callbacks.onText?.(text);
+        if (callbacks.onAudio) {
+          for (const part of message.serverContent?.modelTurn?.parts ?? []) {
+            if (part.inlineData?.data) callbacks.onAudio(Buffer.from(part.inlineData.data, "base64"));
+          }
+        }
+        if (message.serverContent?.interrupted) callbacks.onInterrupted?.();
         if (message.serverContent?.turnComplete) callbacks.onTurnComplete?.();
 
         if (message.toolCall?.functionCalls) {
