@@ -1,7 +1,9 @@
 import "dotenv/config";
 import { createServer, type IncomingMessage } from "node:http";
 import { WebSocketServer } from "ws";
-import { buildMediaStreamTwiml, handleTwilioMediaStream } from "./telephony/twilio.js";
+import { buildMediaStreamTwiml, handleTwilioMediaStream, resolveCallerPhone } from "./telephony/twilio.js";
+import { CALL_GREETING } from "./ai/callPrompt.js";
+import { cachedUlaw8k } from "./voice/elevenlabs.js";
 import { isValidTwilioSignature } from "./telephony/twilioSignature.js";
 import { issueStreamToken } from "./telephony/streamTokens.js";
 
@@ -37,8 +39,14 @@ const server = createServer(async (req, res) => {
       res.end();
       return;
     }
+    const callerPhone = resolveCallerPhone(params);
+    // Шилжүүлсэн дуудлагад оператор ямар дугаар дамжуулж буйг шалгахад хэрэгтэй.
+    console.log("[voice] дуудлага:", {
+      from: params.get("From"), to: params.get("To"), forwardedFrom: params.get("ForwardedFrom"),
+      callerPhone: callerPhone || "(тодорхойгүй)",
+    });
     const twiml = buildMediaStreamTwiml(`wss://${req.headers.host}/media-stream`, {
-      callerPhone: params.get("From") ?? "",
+      callerPhone,
       streamToken: issueStreamToken(),
     });
     res.writeHead(200, { "Content-Type": "text/xml" });
@@ -66,4 +74,10 @@ server.on("upgrade", (req, socket, head) => {
   mediaStreamServer.handleUpgrade(req, socket, head, (ws) => handleTwilioMediaStream(ws));
 });
 
-server.listen(PORT, () => console.log(`AI Front-Desk сервер ${PORT} порт дээр ажиллаж байна`));
+server.listen(PORT, () => {
+  console.log(`AI Front-Desk сервер ${PORT} порт дээр ажиллаж байна`);
+  // Эхний дуудлага ч мэндчилгээг шууд сонсохын тулд урьдчилан бэлдэнэ.
+  if (process.env.VOICE_MODE !== "gemini" && process.env.ELEVENLABS_API_KEY) {
+    cachedUlaw8k(CALL_GREETING).catch((error) => console.error("[voice] мэндчилгээг урьдчилан бэлдэж чадсангүй:", error));
+  }
+});
