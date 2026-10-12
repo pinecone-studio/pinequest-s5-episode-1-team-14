@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import { WebSocketServer } from "ws";
 import { buildMediaStreamTwiml, handleTwilioMediaStream } from "./telephony/twilio.js";
 import { isValidTwilioSignature } from "./telephony/twilioSignature.js";
+import { issueStreamToken } from "./telephony/streamTokens.js";
 
 const PORT = Number(process.env.PORT ?? 8080);
 
@@ -38,6 +39,7 @@ const server = createServer(async (req, res) => {
     }
     const twiml = buildMediaStreamTwiml(`wss://${req.headers.host}/media-stream`, {
       callerPhone: params.get("From") ?? "",
+      streamToken: issueStreamToken(),
     });
     res.writeHead(200, { "Content-Type": "text/xml" });
     res.end(twiml);
@@ -54,7 +56,8 @@ const server = createServer(async (req, res) => {
   res.end();
 });
 
-const mediaStreamServer = new WebSocketServer({ noServer: true });
+// Twilio-ийн мессеж жижиг (20мс аудио ~300 байт); том payload-ыг хүлээн авахгүй.
+const mediaStreamServer = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
 server.on("upgrade", (req, socket, head) => {
   if (req.url !== "/media-stream") {
     socket.destroy();
