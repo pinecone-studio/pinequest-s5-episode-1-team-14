@@ -9,6 +9,8 @@ import { createGeminiLiveSession } from "../ai/geminiLive.js";
 import { CALL_GREETING } from "../ai/callPrompt.js";
 import { cachedUlaw8k, streamUlaw8k } from "../voice/elevenlabs.js";
 import { CallSessionStore } from "../calls/store.js";
+import { inferIntent } from "../calls/intent.js";
+import { createTranscriptRecorder, TranscriptStore } from "../calls/transcript.js";
 import { takeSentences } from "./sentences.js";
 import { consumeStreamToken } from "./streamTokens.js";
 
@@ -148,6 +150,18 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
   let closed = false;
   let callerSpokeAt = 0;
   let awaitingReply = false;
+  // Дуудлагын зорилгыг дуусахад нь тодорхойлоход: AI юу хариулсан, сул цаг шалгасан эсэх.
+  let replyText = "";
+  let checkedAvailability = false;
+  const transcripts = new TranscriptStore();
+  // Бичвэр хадгалах алдаа дуудлагыг тасалдуулах ёсгүй.
+  const transcript = createTranscriptRecorder((turn) => {
+    try {
+      transcripts.append(callId, turn);
+    } catch (error) {
+      console.error("[twilio] бичвэр хадгалж чадсангүй:", error);
+    }
+  });
   const nativeVoice = process.env.VOICE_MODE === "gemini";
   const downsample = createDownsampler24kTo8k();
 
@@ -205,6 +219,17 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
     pendingText = rest;
   }
 
+  function onToolResult(name: string, result: unknown): void {
+    if (name === "check_availability") checkedAvailability = true;
+    const booking = result as { id?: unknown; status?: unknown } | null;
+    if (name !== "create_appointment" || typeof booking?.id !== "string" || booking.status !== "confirmed") return;
+    try {
+      store.update(callId, { bookingId: booking.id, intent: "BOOK_APPOINTMENT" });
+    } catch (error) {
+      console.error("[twilio] захиалгыг дуудлагатай холбож чадсангүй:", error);
+    }
+  }
+
   function onTurnComplete(): void {
     if (pendingText.trim()) enqueueSpeak(pendingText);
     pendingText = "";
@@ -221,7 +246,10 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
     clearTimeout(startTimer);
     geminiSession?.close();
     if (callId) {
+      transcript.endTurn();
       try {
+        const intent = store.get(callId)?.intent ?? inferIntent({ checkedAvailability, replyText });
+        if (intent) store.update(callId, { intent });
         store.finish(callId, { status: "completed", endedAt: new Date().toISOString() });
       } catch (error) {
         console.error("[twilio] дуудлага хаахад алдаа:", error);
@@ -245,10 +273,24 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
         const callerPhone = normalizePhone(message.start.customParameters?.callerPhone);
         store.start({ id: callId, callerPhone, startedAt: new Date().toISOString() });
         // Gemini холбогдох хооронд дуудагч чимээгүй хүлээхгүйн тулд эхэлж мэндэлнэ.
-        if (!nativeVoice) enqueueSpeak(CALL_GREETING, true);
+        if (!nativeVoice) {
+          enqueueSpeak(CALL_GREETING, true);
+          transcript.say("agent", CALL_GREETING);
+        }
         geminiSession = await createGeminiLiveSession({
-          ...(nativeVoice ? { onAudio: onGeminiAudio } : { onText, onTurnComplete }),
+          ...(nativeVoice ? { onAudio: onGeminiAudio } : {}),
+          onText: (delta) => {
+            replyText += delta;
+            transcript.agent(delta);
+            if (!nativeVoice) onText(delta);
+          },
+          onCallerText: transcript.caller,
+          onTurnComplete: () => {
+            transcript.endTurn();
+            if (!nativeVoice) onTurnComplete();
+          },
           onInterrupted,
+          onToolResult,
           onError: (msg) => console.error("[twilio] Gemini алдаа:", msg),
           onClose: endCall,
         }, { callerPhone, greeted: !nativeVoice });
