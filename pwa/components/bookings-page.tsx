@@ -1,73 +1,54 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import type { Booking } from "../../backend/src/calendar/googleCalendar";
-import { formatUlaanbaatarTime as formatTime } from "@/lib/date-time";
+import { groupBookings } from "@/lib/bookings";
+import type { DataSource } from "@/lib/data-source";
+import { formatUlaanbaatarTime } from "@/lib/date-time";
+import { Banner, Empty, Icon, PageHeader, SourceBadge } from "./ui";
 
-const statuses: Record<Booking["status"], string> = { confirmed: "Баталгаажсан" };
-const sources: Record<Booking["source"], string> = { AI_PHONE_AGENT: "AI утасны туслах" };
-
-export default function BookingsPage({ bookings, isDemo }: { bookings: Booking[]; isDemo: boolean }) {
+export default function BookingsPage({ bookings, source, now }: { bookings: Booking[]; source: DataSource; now: number }) {
   const [query, setQuery] = useState("");
-  const [date, setDate] = useState("");
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [view, setView] = useState<"upcoming" | "past">("upcoming");
   const search = query.trim().toLowerCase();
   const phoneSearch = search.replace(/[\s()+-]/g, "");
-  const selectedDate = date.replace(/-/g, ".");
-  const filtered = bookings.filter((booking) => (!date || formatTime(booking.startTime).startsWith(selectedDate)) &&
-    (!search || [booking.customerName, booking.serviceName, booking.id].some((value) => value.toLowerCase().includes(search)) ||
-      (/^\d+$/.test(phoneSearch) && booking.phone.includes(phoneSearch))));
-
-  function reset() { setQuery(""); setDate(""); setExpanded(null); }
+  const groups = groupBookings(bookings.filter((booking) => !search ||
+    [booking.customerName, booking.serviceName].some((value) => value.toLowerCase().includes(search)) ||
+    (/^\d+$/.test(phoneSearch) && booking.phone.includes(phoneSearch))), now);
+  const days = groups[view];
+  const count = (list: typeof days) => list.reduce((sum, day) => sum + day.items.length, 0);
+  // Хамгийн ойрын, хараахан эхлээгүй захиалгыг тодруулна.
+  const next = groups.upcoming.flatMap((day) => day.items).find((booking) => Date.parse(booking.startTime) >= now);
 
   return <>
-    <div className="page-heading">
-      <div><p className="eyebrow">ЦАГ ТОВЛОЛТ</p><h1>Захиалгууд</h1><p className="page-description">Харилцагч, үйлчилгээ, товлосон цагаа нэг дороос.</p></div>
-      <span className="waiting-badge"><span aria-hidden="true" />{isDemo ? "Туршилтын өгөгдөл" : "Холболт хүлээж байна"}</span>
-    </div>
-    <p className="calls-notice">{isDemo
-      ? "Жишээ захиалгуудыг харуулж байна. Эдгээр нь бодит харилцагчийн мэдээлэл эсвэл Calendar захиалга биш."
-      : "Захиалгын мэдээлэл хараахан холбогдоогүй байна. Холбогдсоны дараа жагсаалт энд харагдана."}</p>
-    <section className="panel" aria-labelledby="bookings-title">
-      <div className="panel-heading"><div><p className="eyebrow">ЗАХИАЛГЫН ЖАГСААЛТ</p><h2 id="bookings-title">Бүх захиалга</h2></div><span className="calls-timezone">Улаанбаатар · UTC+8</span></div>
-      <div className="calls-filters">
-        <label className="calls-search">Нэр, утас, үйлчилгээ эсвэл ID<input type="search" value={query} placeholder="Харилцагч эсвэл захиалга хайх" onChange={(event) => { setQuery(event.target.value); setExpanded(null); }} disabled={!bookings.length} /></label>
-        <label>Өдөр · Улаанбаатар<input type="date" value={date} onChange={(event) => { setDate(event.target.value); setExpanded(null); }} disabled={!bookings.length} /></label>
-        <button type="button" className="calls-button" onClick={reset} disabled={!query && !date}>Цэвэрлэх</button>
+    <PageHeader title="Захиалгууд" subtitle="Өнөөдөр болон ирэх өдрүүдэд хэн ирэх вэ."><SourceBadge source={source} /></PageHeader>
+    {source === "demo" && <Banner>Жишээ захиалгуудыг харуулж байна. Эдгээр нь бодит харилцагч эсвэл Calendar-ийн захиалга биш.</Banner>}
+    {source === "offline" && <Banner>Google Calendar-аас захиалгуудыг уншиж чадсангүй. Backend сервер болон Calendar-ийн тохиргоог шалгана уу.</Banner>}
+
+    <section className="card" aria-label="Захиалгын хуваарь">
+      <div className="toolbar">
+        <label className="search"><span className="sr-only">Нэр, утас эсвэл үйлчилгээ</span><Icon name="search" size={15} />
+          <input className="input" type="search" value={query} placeholder="Нэр, утас эсвэл үйлчилгээ хайх" disabled={!bookings.length} onChange={(event) => setQuery(event.target.value)} /></label>
+        <div className="segmented" role="group" aria-label="Хугацаагаар шүүх">
+          <button type="button" aria-pressed={view === "upcoming"} onClick={() => setView("upcoming")}>Ирэх<span className="count">{count(groups.upcoming)}</span></button>
+          <button type="button" aria-pressed={view === "past"} onClick={() => setView("past")}>Өнгөрсөн<span className="count">{count(groups.past)}</span></button>
+        </div>
       </div>
-      {bookings.length > 0 && <p className="calls-count" role="status">{bookings.length} захиалгаас {filtered.length} харагдаж байна · Эхлэх цагаар өсөх дараалал</p>}
-      {filtered.length > 0 ? <div className="calls-table-scroll" role="region" aria-label="Захиалгын жагсаалт, жижиг дэлгэц дээр хажуу тийш гүйлгэнэ" tabIndex={0}>
-        <table className="calls-table">
-          <caption className="sr-only">Захиалгууд, эхлэх цагаар өсөх дарааллаар</caption>
-          <thead><tr><th scope="col">Харилцагч</th><th scope="col">Үйлчилгээ</th><th scope="col">Эхлэх цаг</th><th scope="col">Хугацаа</th><th scope="col">Төлөв</th><th scope="col">Эх үүсвэр</th><th scope="col"><span className="sr-only">Дэлгэрэнгүй</span></th></tr></thead>
-          <tbody>{filtered.map((booking) => {
-            const detailId = `booking-detail-${encodeURIComponent(booking.id)}`;
-            return <Fragment key={booking.id}>
-              <tr className="call-row booking-row">
-                <th scope="row"><strong>{booking.customerName}</strong><small>{booking.phone}</small></th>
-                <td>{booking.serviceName}</td>
-                <td><time dateTime={booking.startTime}>{formatTime(booking.startTime)}</time></td>
-                <td>{booking.durationMinutes} мин</td>
-                <td><span className="call-status call-status-completed">{statuses[booking.status]}</span></td>
-                <td>{sources[booking.source]}</td>
-                <td><button type="button" className="calls-button" aria-expanded={expanded === booking.id} aria-controls={detailId} onClick={() => setExpanded(expanded === booking.id ? null : booking.id)}>{expanded === booking.id ? "Хураах" : "Дэлгэрэнгүй"}<span className="sr-only"> {booking.id}</span></button></td>
-              </tr>
-              <tr id={detailId} hidden={expanded !== booking.id}><td colSpan={7} className="call-detail"><dl>
-                <div><dt>Захиалгын ID</dt><dd>{booking.id}</dd></div>
-                <div><dt>Calendar event ID</dt><dd>{booking.calendarEventId}</dd></div>
-                <div><dt>Үйлчилгээний ID</dt><dd>{booking.serviceId}</dd></div>
-                <div><dt>Дуусах цаг · Улаанбаатар</dt><dd><time dateTime={booking.endTime}>{formatTime(booking.endTime)}</time></dd></div>
-                <div><dt>Эх үүсвэр</dt><dd>{sources[booking.source]}</dd></div>
-              </dl></td></tr>
-            </Fragment>;
-          })}</tbody>
-        </table>
-      </div> : <div className="empty-state">
-        <h3>{bookings.length ? "Тохирох захиалга олдсонгүй" : "Захиалгын жагсаалт хараахан алга"}</h3>
-        <p>{bookings.length ? "Хайлтаа өөрчлөх эсвэл өдрийн шүүлтүүрээ цэвэрлээрэй." : "Мэдээлэл холбогдмогц захиалгууд энд харагдана."}</p>
-        {bookings.length > 0 && <button type="button" className="calls-button" onClick={reset}>Бүх захиалгыг харах</button>}
-      </div>}
-      <p className="connection-note">Огноо, цагийг Улаанбаатарын цагаар харуулна. Жижиг дэлгэц дээр жагсаалтыг хажуу тийш гүйлгэнэ.</p>
+      {days.length > 0 ? days.map((day) => <div key={day.date}>
+        <h2 className="day-head">{day.label}<span>{day.items.length} захиалга</span></h2>
+        <ul className="agenda">
+          {day.items.map((booking) => <li key={booking.id} className={booking === next ? "is-next" : view === "upcoming" && Date.parse(booking.endTime) < now ? "is-done" : undefined}>
+            <p className="agenda-time"><time dateTime={booking.startTime}>{formatUlaanbaatarTime(booking.startTime).slice(11)}</time><small>{booking.durationMinutes} мин</small></p>
+            <div>
+              <p className="agenda-title">{booking.customerName}</p>
+              <p className="agenda-sub">{booking.serviceName} · {booking.phone}</p>
+            </div>
+            {booking === next ? <span className="badge badge-blue">Дараагийнх</span> : <span className="badge badge-green">Баталгаажсан</span>}
+          </li>)}
+        </ul>
+      </div>) : <Empty title={search ? "Тохирох захиалга олдсонгүй" : view === "upcoming" ? "Ирэх захиалга алга" : "Өнгөрсөн захиалга алга"}
+        text={search ? "Хайлтаа өөрчилж үзээрэй." : view === "upcoming" ? "AI туслах цаг захиалмагц энд харагдана." : "Өмнөх өдрүүдийн захиалга энд харагдана."} />}
+      <p className="card-footer">Цагийг Улаанбаатарын цагаар харуулна. Сүүлийн 30 хоног болон ирэх захиалгууд.</p>
     </section>
   </>;
 }

@@ -3,69 +3,112 @@
 import { useState } from "react";
 import { summarizeAnalytics, type AnalyticsCall, type AnalyticsBooking } from "@/lib/analytics";
 import { callStatuses, callIntents } from "@/lib/call-labels";
+import type { DataSource } from "@/lib/data-source";
+import { formatDuration, formatUlaanbaatarTime } from "@/lib/date-time";
+import { callsWithin, recentDays } from "@/lib/overview";
+import { Banner, Empty, PageHeader, SourceBadge } from "./ui";
 
-export default function AnalyticsPage({ calls, bookings, isDemo }: { calls: AnalyticsCall[]; bookings: AnalyticsBooking[]; isDemo: boolean }) {
-  const [date, setDate] = useState("");
-  const summary = summarizeAnalytics(calls, bookings, date);
+const RANGES = [{ value: 1, label: "Өнөөдөр" }, { value: 7, label: "7 хоног" }, { value: 30, label: "30 хоног" }, { value: 0, label: "Бүгд" }];
+
+export default function AnalyticsPage({ calls: allCalls, bookings: allBookings, source, bookingsSource, now }: {
+  calls: AnalyticsCall[]; bookings: AnalyticsBooking[]; source: DataSource; bookingsSource: DataSource; now: number;
+}) {
+  const [range, setRange] = useState(7);
+  // Бүх үзүүлэлт, график, хүснэгт нэг л хугацааны хүрээг ашиглана.
+  const days = range ? recentDays(allCalls, range, now) : null;
+  const calls = days ? callsWithin(allCalls, days) : allCalls;
+  const bookings = days
+    ? callsWithin(allBookings.map(({ startTime }) => ({ startedAt: startTime })), days).map(({ startedAt }) => ({ startTime: startedAt }))
+    : allBookings;
+  const summary = summarizeAnalytics(calls, bookings);
   const { totalCalls, totalBookings, finishedCalls, convertedCalls, averageDuration, conversionRate } = summary;
-  const metrics = [
-    { label: "Нийт дуудлага", value: totalCalls, note: "Эхэлсэн өдрөөр, бүх төлөв" },
-    { label: "Дууссан дуудлага", value: summary.statuses.completed, note: "Дууссан төлөвтэй дуудлага" },
-    { label: "Нийт захиалга", value: totalBookings, note: "Үйлчилгээ авах товлосон өдрөөр" },
-    { label: "Захиалга болсон хувь", value: conversionRate === null ? null : `${conversionRate.toFixed(1)}%`, note: `${finishedCalls} дуусгавар дуудлагаас ${convertedCalls} нь захиалгатай` },
-    { label: "Дундаж дуудлагын хугацаа", value: averageDuration === null ? null : `${Math.floor(averageDuration / 60)}:${String(averageDuration % 60).padStart(2, "0")}`, note: "Дуусгавар дуудлагын минут:секунд" },
-    { label: "Тооцоолсон орлого", value: null, note: "Захиалгын баталгаажсан үнэ шаардлагатай" },
+  const hasCalls = source !== "offline";
+  const hasBookings = bookingsSource !== "offline";
+  const dash = <><span aria-hidden="true">—</span><span className="sr-only">Мэдээлэл алга</span></>;
+  const stats = [
+    { label: "Захиалга болсон хувь", value: hasCalls && conversionRate !== null ? conversionRate.toFixed(0) + "%" : null, hint: finishedCalls + " дууссанаас " + convertedCalls },
+    { label: "Дундаж хугацаа", value: hasCalls && averageDuration !== null ? formatDuration(averageDuration) : null, hint: "Минут:секунд" },
+    { label: "Товлосон захиалга", value: hasBookings ? totalBookings : null, hint: hasBookings ? "Үйлчилгээ авах өдрөөр" : "Calendar холбогдоогүй" },
   ];
   const breakdowns = [
     { id: "status", title: "Дуудлагын төлөв", rows: Object.entries(callStatuses).map(([key, label]) => ({ label, count: summary.statuses[key as keyof typeof callStatuses] })) },
-    { id: "intent", title: "Дуудлагын зорилго", rows: Object.entries({ ...callIntents, unknown: "Тодорхойгүй" }).map(([key, label]) => ({ label, count: summary.intents[key as keyof typeof summary.intents] })).filter(({ count }) => count > 0) },
+    { id: "intent", title: "Юу асуусан бэ", rows: Object.entries({ ...callIntents, unknown: "Тодорхойгүй" }).map(([key, label]) => ({ label, count: summary.intents[key as keyof typeof summary.intents] })).filter(({ count }) => count > 0).sort((a, b) => b.count - a.count) },
   ];
+  // Цагаар: дуудлага ирсэн хамгийн эрт цагаас хамгийн орой цаг хүртэл, Улаанбаатарын цагаар.
+  const byHour = new Map<number, number>();
+  for (const call of calls) {
+    const hour = Number(formatUlaanbaatarTime(call.startedAt).slice(11, 13));
+    byHour.set(hour, (byHour.get(hour) ?? 0) + 1);
+  }
+  const hourKeys = [...byHour.keys()];
+  const hours = hourKeys.length ? Array.from({ length: Math.max(...hourKeys) - Math.min(...hourKeys) + 1 }, (_, index) => {
+    const hour = Math.min(...hourKeys) + index;
+    return { hour, count: byHour.get(hour) ?? 0 };
+  }) : [];
+  const peak = hours.reduce((best, item) => item.count > best.count ? item : best, { hour: 0, count: 0 });
+  const pad = (hour: number) => String(hour).padStart(2, "0") + ":00";
 
   return <>
-    <div className="page-heading">
-      <div><p className="eyebrow">ҮЙЛ АЖИЛЛАГААНЫ ҮР ДҮН</p><h1>Тайлан</h1><p className="page-description">Дуудлага, захиалгын үр дүнг өдрөөр нь хараарай.</p></div>
-      <span className="waiting-badge"><span aria-hidden="true" />{isDemo ? "Туршилтын өгөгдөл" : "Холболт хүлээж байна"}</span>
-    </div>
-    <p className="calls-notice">{isDemo ? "Тайлан нь Дуудлагууд, Захиалгууд хэсгийн жишээ өгөгдлөөс тооцоологдсон. Бодит бизнесийн үр дүн биш." : "Тайлангийн мэдээлэл хараахан холбогдоогүй байна. Холбогдсоны дараа үзүүлэлтүүд харагдана."}</p>
-    <section className="panel analytics-filter" aria-labelledby="period-title">
-      <div className="panel-heading"><h2 id="period-title">Тайлангийн өдөр</h2><span className="calls-timezone">Улаанбаатар · UTC+8</span></div>
-      <div className="calls-filters">
-        <label>Өдөр<input type="date" value={date} onChange={(event) => setDate(event.target.value)} disabled={!isDemo} /></label>
-        <button type="button" className="calls-button" onClick={() => setDate("")} disabled={!date}>Бүх өдөр</button>
-        <p className="analytics-period" role="status">{isDemo ? `${date || "Бүх өдөр"} · ${totalCalls} дуудлага · ${totalBookings} захиалга` : "Мэдээлэл хүлээж байна"}</p>
+    <PageHeader title="Тайлан" subtitle="Сонгосон хугацаанд AI туслах яаж ажилласан бэ.">
+      <div className="segmented" role="group" aria-label="Хугацаа">
+        {RANGES.map(({ value, label }) => <button type="button" key={value} aria-pressed={range === value} disabled={!hasCalls} onClick={() => setRange(value)}>{label}</button>)}
       </div>
-    </section>
-    <section aria-label="Тайлангийн үзүүлэлтүүд">
-      <dl className="metrics-grid">
-        {metrics.map(({ label, value, note }) => <div className="metric-card analytics-metric" key={label}>
-          <dt>{label}</dt><dd><span className="analytics-value">{isDemo && value !== null ? value : <><span aria-hidden="true">—</span><span className="sr-only">Мэдээлэл алга</span></>}</span>
-            <small>{isDemo ? note : "Мэдээлэл холбогдоогүй"}</small></dd>
-        </div>)}
-      </dl>
-      <p className="metrics-note">Явагдаж буй дуудлага хувь болон дундаж хугацаанд орохгүй. Дууссан, амжилтгүй, ажилтанд шилжсэн дуудлагыг дуусгаварт тооцов.</p>
-    </section>
-    {isDemo && (totalCalls > 0 || totalBookings > 0) ? <>
-      <div className="dashboard-grid">
-        {breakdowns.map(({ id, title, rows }) => <section className="panel" aria-labelledby={`${id}-title`} key={id}>
-          <div className="panel-heading"><h2 id={`${id}-title`}>{title}</h2></div>
-          {totalCalls ? <ul className="analytics-bars">{rows.map(({ label, count }) => <li key={label}>
-            <div><span>{label}</span><strong>{count} <small>· {(count / totalCalls * 100).toFixed(1)}%</small></strong></div>
-            <div className="analytics-track" aria-hidden="true"><span style={{ width: `${count / totalCalls * 100}%` }} /></div>
-          </li>)}</ul> : <p className="empty-state">Энэ өдөр дуудлага алга.</p>}
+      <SourceBadge source={source} />
+    </PageHeader>
+    {source === "demo" && <Banner>Тайлан нь жишээ өгөгдлөөс тооцоологдсон. Бодит бизнесийн үр дүн биш.</Banner>}
+    {source === "offline" && <Banner>Backend сервер рүү хүрч чадсангүй. Сервер ажиллаж эхэлмэгц үзүүлэлтүүд харагдана.</Banner>}
+
+    <dl className="stats stats-lead" aria-label="Тайлангийн үзүүлэлтүүд">
+      <div className="stat stat-lead">
+        <dt>Нийт дуудлага</dt>
+        <dd><span className="stat-value">{hasCalls ? totalCalls : dash}</span>
+          <span className="stat-hint">{summary.statuses.completed} хэвийн дууссан · {summary.statuses.handed_off} ажилтанд шилжсэн · {summary.statuses.failed} амжилтгүй</span></dd>
+      </div>
+      {stats.map(({ label, value, hint }) => <div className="stat" key={label}>
+        <dt>{label}</dt>
+        <dd><span className="stat-value">{value ?? dash}</span><span className="stat-hint">{hint}</span></dd>
+      </div>)}
+    </dl>
+
+    {hasCalls && totalCalls > 0 ? <>
+      <section className="card" aria-labelledby="hours-title">
+        <div className="card-header"><h2 className="card-title" id="hours-title">Аль цагт их залгадаг вэ</h2>
+          <span className="card-meta">Хамгийн ачаалалтай: {pad(peak.hour)}–{pad(peak.hour + 1)} · {peak.count} дуудлага</span></div>
+        <div className="hours" role="img" aria-label={"Цагаар дуудлагын тоо: " + hours.map(({ hour, count }) => pad(hour) + " " + count).join(", ")}>
+          {hours.map(({ hour, count }) => <div className="week-day" key={hour} title={pad(hour) + "–" + pad(hour + 1) + ": " + count + " дуудлага"}>
+            <span className="week-track">
+              {hour === peak.hour && <span className="week-count">{count}</span>}
+              <span className={hour === peak.hour ? "week-bar is-today" : "week-bar"} style={{ height: Math.max(3, count / peak.count * 100) + "%" }} />
+            </span>
+            <span className={hour === peak.hour ? "week-label is-today" : "week-label"}>{hour}</span>
+          </div>)}
+        </div>
+      </section>
+
+      <div className="grid-2 grid-even section">
+        {breakdowns.map(({ id, title, rows }) => <section className="card" aria-labelledby={id + "-title"} key={id}>
+          <div className="card-header"><h2 className="card-title" id={id + "-title"}>{title}</h2></div>
+          <ul className="bars">{rows.map(({ label, count }) => <li key={label}>
+            <div className="bar-row"><span>{label}</span><span className="num">{count} <span className="muted">· {(count / totalCalls * 100).toFixed(0)}%</span></span></div>
+            <div className="bar-track" aria-hidden="true"><span style={{ width: count / totalCalls * 100 + "%" }} /></div>
+          </li>)}</ul>
         </section>)}
       </div>
-      <section className="panel analytics-daily" aria-labelledby="daily-title">
-        <div className="panel-heading"><h2 id="daily-title">Өдрийн задаргаа</h2><span className="calls-timezone">Өгөгдөлтэй өдрүүд</span></div>
-        <div className="calls-table-scroll" role="region" aria-label="Өдрийн тайлан, хажуу тийш гүйлгэнэ" tabIndex={0}>
-          <table className="calls-table analytics-table">
-            <caption className="sr-only">Улаанбаатарын өдрөөр өсөх дараалалтай дуудлага, товлосон захиалга</caption>
+
+      <section className="card section" aria-labelledby="daily-title">
+        <div className="card-header"><h2 className="card-title" id="daily-title">Өдрийн задаргаа</h2><span className="card-meta">Улаанбаатарын өдрөөр</span></div>
+        <div className="table-wrap" role="region" aria-label="Өдрийн тайлан" tabIndex={0}>
+          <table className="table">
+            <caption className="sr-only">Өдөр бүрийн дуудлага, товлосон захиалга</caption>
             <thead><tr><th scope="col">Өдөр</th><th scope="col">Дуудлага</th><th scope="col">Товлосон захиалга</th></tr></thead>
-            <tbody>{summary.daily.map((day) => <tr key={day.date}><th scope="row"><time dateTime={day.date}>{day.date}</time></th><td>{day.calls}</td><td>{day.bookings}</td></tr>)}</tbody>
+            <tbody>{[...summary.daily].reverse().map((day) => <tr className="row" key={day.date}>
+              <th scope="row" className="num"><time dateTime={day.date}>{day.date.replace(/-/g, ".")}</time></th><td className="num">{day.calls}</td><td className="num">{hasBookings ? day.bookings : "—"}</td>
+            </tr>)}</tbody>
           </table>
         </div>
-        <p className="connection-note">Захиалгыг товлосон өдрөөр тоолов. Дуудлага хийсэн өдөр нь үйлчилгээ авах өдрөөс ялгаатай байж болно.</p>
+        <p className="card-footer">Явагдаж буй дуудлага хувь болон дундаж хугацаанд орохгүй. Захиалгыг товлосон өдрөөр нь тоолно.</p>
       </section>
-    </> : <section className="panel analytics-daily"><div className="empty-state"><h2>{isDemo ? "Сонгосон өдөр мэдээлэл алга" : "Тайлан хараахан бэлэн болоогүй"}</h2><p>{isDemo ? "Өөр өдөр сонгох эсвэл бүх өдрийг харна уу." : "Дуудлага, захиалгын мэдээлэл холбогдохыг хүлээж байна."}</p></div></section>}
-    <p className="metrics-note">AI хариулсан хувь, орлого, ROI одоогоор тооцоологдохгүй. Хариулсан эсэх, захиалгын үнэ, зардлын мэдээлэл шаардлагатай.</p>
+    </> : <section className="card"><Empty title={hasCalls ? "Энэ хугацаанд дуудлага алга" : "Тайлан хараахан бэлэн болоогүй"}
+      text={hasCalls ? "Өөр хугацаа сонгоно уу." : "Дуудлагын мэдээлэл холбогдохыг хүлээж байна."} /></section>}
   </>;
 }

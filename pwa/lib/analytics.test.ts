@@ -50,20 +50,28 @@ test("dates use Ulaanbaatar midnight for both calls and scheduled bookings; days
   assert.deepEqual(summarizeAnalytics(calls, bookings, "2026-10-10").daily, []);
 });
 
-test("analytics agrees with the existing demo adapters and their disabled mode", () => {
-  const original = process.env.NEXT_PUBLIC_USE_MOCK_API;
+test("analytics agrees with the demo adapters, and an unreachable backend reads as offline", async () => {
+  const original = { mock: process.env.NEXT_PUBLIC_USE_MOCK_API, backend: process.env.BACKEND_API_URL };
   try {
     process.env.NEXT_PUBLIC_USE_MOCK_API = "true";
-    const result = summarizeAnalytics(getCalls().calls, getBookings().bookings);
+    const demo = await getCalls();
+    const demoBookings = await getBookings();
+    assert.equal(demo.source, "demo"); assert.equal(demoBookings.source, "demo");
+    const result = summarizeAnalytics(demo.calls, demoBookings.bookings);
     assert.equal(result.totalCalls, 6); assert.equal(result.totalBookings, 6);
     assert.equal(result.statuses.completed, 3); assert.equal(result.finishedCalls, 5);
     assert.equal(result.conversionRate, 20); assert.equal(result.averageDuration, 86);
     assert.deepEqual(result.daily, [{ date: "2026-10-08", calls: 6, bookings: 3 }, { date: "2026-10-09", calls: 0, bookings: 3 }]);
     process.env.NEXT_PUBLIC_USE_MOCK_API = "false";
-    assert.equal(getCalls().isDemo, false); assert.equal(getBookings().isDemo, false);
-    assert.deepEqual(summarizeAnalytics(getCalls().calls, getBookings().bookings), summarizeAnalytics([], []));
+    process.env.BACKEND_API_URL = "http://127.0.0.1:9"; // хаалттай порт — тест бодит backend-ээс хамаарахгүй
+    const offline = await getCalls();
+    const offlineBookings = await getBookings();
+    assert.equal(offline.source, "offline"); assert.equal(offlineBookings.source, "offline");
+    assert.deepEqual(summarizeAnalytics(offline.calls, offlineBookings.bookings), summarizeAnalytics([], []));
   } finally {
-    if (original === undefined) delete process.env.NEXT_PUBLIC_USE_MOCK_API;
-    else process.env.NEXT_PUBLIC_USE_MOCK_API = original;
+    for (const [key, value] of [["NEXT_PUBLIC_USE_MOCK_API", original.mock], ["BACKEND_API_URL", original.backend]] as const) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 });

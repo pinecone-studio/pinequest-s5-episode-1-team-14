@@ -1,82 +1,75 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Icon, type IconName } from "./ui";
 
-const sections = [
-  { label: "Ерөнхий тойм", href: "/dashboard", enabled: true },
-  { label: "Дуудлагууд", href: "/calls", enabled: true },
-  { label: "Захиалгууд", href: "/bookings", enabled: true },
-  { label: "Мэдээллийн сан", href: "/knowledge", enabled: true },
-  { label: "Тайлан", href: "/analytics", enabled: true },
-  { label: "Туршилтын дуудлага", href: "/demo", enabled: false },
-  { label: "Тохиргоо", href: "/settings", enabled: false },
+type Item = { label: string; href: string; icon: IconName; soon?: boolean };
+
+const groups: { label: string; items: Item[] }[] = [
+  { label: "Ажлын орчин", items: [
+    { label: "Ерөнхий тойм", href: "/dashboard", icon: "grid" },
+    { label: "Дуудлагууд", href: "/calls", icon: "phone" },
+    { label: "Захиалгууд", href: "/bookings", icon: "calendar" },
+  ] },
+  { label: "Удирдлага", items: [
+    { label: "Мэдээллийн сан", href: "/knowledge", icon: "book" },
+    { label: "Тайлан", href: "/analytics", icon: "chart" },
+  ] },
+  { label: "Удахгүй", items: [
+    { label: "Туршилтын дуудлага", href: "/demo", icon: "play", soon: true },
+    { label: "Тохиргоо", href: "/settings", icon: "sliders", soon: true },
+  ] },
 ];
 
-function Navigation() {
-  const pathname = usePathname();
-  return (
-    <nav aria-label="Үндсэн цэс">
-      <ul className="nav-list">
-        {sections.map((section) => {
-          const content = <>
-            <span>{section.label}</span>
-            {!section.enabled && <small>Удахгүй</small>}
-          </>;
-          return <li key={section.href}>
-            {section.enabled ? (
-              <Link href={section.href} aria-current={pathname === section.href ? "page" : undefined}
-                onClick={(event) => {
-                  const menu = event.currentTarget.closest("details");
-                  if (menu) { menu.open = false; menu.querySelector("summary")?.focus(); }
-                }}>{content}</Link>
-            ) : <button type="button" disabled>{content}</button>}
-          </li>;
-        })}
-      </ul>
-    </nav>
-  );
-}
-
-function ThemeToggle() {
-  const modes = ["auto", "light", "dark"] as const;
-  const [mode, setMode] = useState<typeof modes[number]>("auto");
-  useEffect(() => {
-    const saved = document.documentElement.dataset.theme;
-    setMode(saved === "light" || saved === "dark" ? saved : "auto");
-  }, []);
-  const index = modes.indexOf(mode);
-  return <button type="button" className="theme-button" aria-label={`Загвар солих: ${["автомат", "цайвар", "бараан"][index]}`} onClick={() => {
-    const next = modes[(index + 1) % modes.length];
-    if (next === "auto") document.documentElement.removeAttribute("data-theme");
-    else document.documentElement.dataset.theme = next;
-    try { localStorage.setItem("theme", next); } catch { /* Keep the selected theme for this document. */ }
-    setMode(next);
-  }}>{["◐", "☀", "☾"][index]}</button>;
+function Brand() {
+  return <Link className="brand" href="/dashboard"><Image src="/logo-mark.png" alt="" width={36} height={36} priority /><span><b>AI</b> Front Desk</span></Link>;
 }
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  return <div className="workspace">
+  const [open, setOpen] = useState(false);
+  // Хуудас солигдох бүрт гар утасны цэсийг хаана.
+  useEffect(() => setOpen(false), [pathname]);
+  // Шинэ дуудлага, захиалга гараар refresh хийлгүй гарч ирэхийн тулд серверийн өгөгдлийг 2 секунд тутам шинэчилнэ.
+  const router = useRouter();
+  useEffect(() => {
+    const timer = setInterval(() => { if (document.visibilityState === "visible") router.refresh(); }, 2000);
+    return () => clearInterval(timer);
+  }, [router]);
+
+  return <div className="app">
     <a className="skip-link" href="#main-content">Үндсэн агуулга руу очих</a>
-    <header className="workspace-header">
-      <div className="topbar">
-        <a className="brand" href="/" aria-label="AI Front-Desk — нүүр хуудас">AI Front-Desk</a>
-        <ThemeToggle />
-        <details className="mobile-menu">
-          <summary><span aria-hidden="true">☰</span> Цэс</summary>
-          <div className="mobile-navigation"><Navigation /></div>
-        </details>
+
+    <aside className={`sidebar${open ? " is-open" : ""}`}>
+      <Brand />
+      <nav aria-label="Үндсэн цэс">
+        {groups.map((group) => <div className="nav-group" key={group.label}>
+          <p className="nav-label">{group.label}</p>
+          <ul>
+            {group.items.map((item) => <li key={item.href}>
+              {item.soon
+                ? <span className="nav-link is-disabled" aria-disabled="true"><Icon name={item.icon} />{item.label}</span>
+                : <Link className="nav-link" href={item.href} aria-current={pathname === item.href ? "page" : undefined}><Icon name={item.icon} />{item.label}</Link>}
+            </li>)}
+          </ul>
+        </div>)}
+      </nav>
+      <div className="sidebar-footer">
+        <a href="https://github.com/pinecone-studio/pinequest-s5-episode-1-team-14#local-setup" target="_blank" rel="noreferrer">Ашиглах заавар <Icon name="external" size={12} /><span className="sr-only"> (шинэ цонхонд нээгдэнэ)</span></a>
+        <span>© 2026 AI Front-Desk Mongolia</span>
       </div>
-      <div className="desktop-navigation"><Navigation /></div>
-    </header>
-    <main id="main-content" tabIndex={-1} className="dashboard-content">
-        <p className="breadcrumb">Ажлын орчин <span aria-hidden="true">/</span> <strong>{sections.find((section) => section.href === pathname)?.label ?? "Удирдлагын самбар"}</strong></p>
-        {children}
-    </main>
-    <footer className="page-footer"><span>© 2026 AI Front-Desk Mongolia</span>
-      <a className="guide-link" href="https://github.com/pinecone-studio/pinequest-s5-episode-1-team-14#local-setup" target="_blank" rel="noreferrer">Ашиглах заавар <span aria-hidden="true">↗</span><span className="sr-only"> (шинэ цонхонд нээгдэнэ)</span></a>
-    </footer>
+    </aside>
+    {open && <button type="button" className="backdrop" aria-label="Цэсийг хаах" onClick={() => setOpen(false)} />}
+
+    <div className="main">
+      <header className="topbar">
+        <button type="button" className="btn btn-icon" aria-expanded={open} aria-label="Цэс" onClick={() => setOpen(!open)}><Icon name="menu" /></button>
+        <Brand />
+      </header>
+      <main id="main-content" tabIndex={-1} className="content">{children}</main>
+    </div>
   </div>;
 }
