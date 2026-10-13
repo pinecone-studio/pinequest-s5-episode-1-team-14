@@ -35,4 +35,6 @@ test("caller phone is kept for real callers and dropped when forwarding hides it
   assert.equal(phone({ From: "+15005550006", To: "+15005550006" }), "");
   assert.equal(phone({ From: "anonymous", To: "+15005550006" }), "");
   assert.equal(phone({ To: "+15005550006" }), "");
+  // Буцааж залгасан дуудлага.
+  assert.equal(phone({ From: "+15005550006", To: "+97699112233", Direction: "outbound-api" }), "+97699112233");
 });

@@ -58,7 +58,19 @@ html { scroll-behavior: smooth; }
 @keyframes lp-ring { from { transform: scale(1); opacity: 0.7; } to { transform: scale(2.3); opacity: 0; } }
 .lp-hero h1 { color: #fff; font-size: clamp(44px, 7vw, 84px); line-height: 1.04; }
 .lp-hero .lp-lead { max-width: 640px; margin: 24px auto 0; color: rgba(255, 255, 255, 0.86); font-size: 19px; }
-.lp-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 34px; }
+/* "Над руу залга" маягт */
+.lp-callback { max-width: 520px; margin: 34px auto 0; }
+.lp-callback-row { display: flex; gap: 8px; padding: 6px; border-radius: 999px; background: #fff; box-shadow: 0 16px 40px rgba(4, 6, 60, 0.35); }
+.lp-callback-field { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; padding-left: 20px; color: var(--text); font-weight: 600; }
+.lp-callback-field input { flex: 1; min-width: 0; height: 50px; border: 0; outline: 0; background: none; color: var(--ink); font: inherit; font-size: 17px; }
+.lp-callback-field input::placeholder { color: #9aa3bf; font-weight: 400; }
+.lp-callback-row:focus-within { outline: 3px solid var(--sky); outline-offset: 2px; }
+.lp-callback button.lp-btn-primary { border-color: var(--blue); background: var(--blue); color: #fff; font-family: inherit; cursor: pointer; white-space: nowrap; }
+.lp-callback button.lp-btn-primary:hover { background: #0057db; }
+.lp-callback button:disabled { opacity: 0.7; cursor: default; transform: none; }
+.lp-callback-note { margin-top: 14px; color: rgba(255, 255, 255, 0.86); font-size: 15px; }
+.lp-callback-note.is-error { color: #ffd0d0; }
+.lp-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 22px; }
 .lp-facts { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 30px; }
 .lp-facts li { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; background: rgba(255, 255, 255, 0.14); color: #fff; font-size: 14px; font-weight: 500; }
 .lp-facts li::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--sky); }
@@ -216,6 +228,8 @@ html { scroll-behavior: smooth; }
 }
 @media (max-width: 640px) {
   .lp-hero { padding-top: 120px; }
+  .lp-callback-row { flex-direction: column; padding: 10px; border-radius: 24px; }
+  .lp-callback-field { padding-left: 12px; }
   .lp-hero .lp-lead { font-size: 17px; }
   .lp-btn-small { display: none; }
   .lp-journey, .lp-bento { grid-template-columns: 1fr; }

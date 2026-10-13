@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geologica } from "next/font/google";
 import Image from "next/image";
 import Link from "next/link";
+import { CallbackForm } from "@/components/callback-form";
 import { Icon, type IconName } from "@/components/ui";
 import "./landing.css";
 
@@ -100,8 +101,9 @@ export default function LandingPage() {
         </div>
         <h1>Нэг ч дуудлага<br /><em>алдахгүй</em></h1>
         <p className="lp-lead">Завгүй үед ч, ажлын цаг дууссан ч AI хүлээн авагч таны бизнесийн утсанд хариулж, асуултад хариулан, цагийг шууд захиална.</p>
+        <CallbackForm />
         <div className="lp-actions">
-          <PrimaryCta />
+          <Link className="lp-btn" href="/dashboard">Хянах самбар үзэх<Icon name="arrow" /></Link>
           <a className="lp-btn" href="#call">Хэрхэн ажилладаг вэ</a>
         </div>
         <ul className="lp-facts">

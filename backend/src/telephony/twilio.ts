@@ -6,6 +6,7 @@
 
 import type { WebSocket, RawData } from "ws";
 import { createGeminiLiveSession } from "../ai/geminiLive.js";
+import { createGeminiTurnSession } from "../ai/geminiTurns.js";
 import { CALL_GREETING } from "../ai/callPrompt.js";
 import { cachedUlaw8k, streamUlaw8k } from "../voice/elevenlabs.js";
 import { CallSessionStore } from "../calls/store.js";
@@ -106,6 +107,8 @@ function normalizePhone(value: unknown): string | null {
 // дуудагчийн оронд бизнесийн дугаарыг From-д тавьдаг. Тэр тохиолдолд
 // дугаарыг тодорхойгүй гэж үзнэ — agent амаар асууна.
 export function resolveCallerPhone(params: URLSearchParams): string {
+  // Буцааж залгасан дуудлагад From нь манай Twilio дугаар, харилцагч нь To.
+  if (params.get("Direction") === "outbound-api") return params.get("To") ?? "";
   const last8 = (name: string) => (params.get(name) ?? "").replace(/\D/g, "").slice(-8);
   const from = last8("From");
   if (from.length < 8 || from === last8("To") || from === last8("ForwardedFrom")) return "";
@@ -146,7 +149,7 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
   // тэр хүртэл тоглож дуусмагц буцааж мэдэгдэнэ.
   let streaming = false;
   let marksPending = 0;
-  let geminiSession: Awaited<ReturnType<typeof createGeminiLiveSession>> | null = null;
+  let geminiSession: Awaited<ReturnType<typeof createGeminiTurnSession>> | null = null;
   let closed = false;
   let callerSpokeAt = 0;
   let awaitingReply = false;
@@ -277,7 +280,9 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
           enqueueSpeak(CALL_GREETING, true);
           transcript.say("agent", CALL_GREETING);
         }
-        geminiSession = await createGeminiLiveSession({
+        // Анхдагч нь ээлжилсэн горим (монгол яриаг илүү таньдаг). Gemini-ийн өөрийн дуу эсвэл AI_MODE=live бол Live.
+        const createSession = nativeVoice || process.env.AI_MODE === "live" ? createGeminiLiveSession : createGeminiTurnSession;
+        geminiSession = await createSession({
           ...(nativeVoice ? { onAudio: onGeminiAudio } : {}),
           onText: (delta) => {
             replyText += delta;
