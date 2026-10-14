@@ -10,7 +10,7 @@ import { getCalls } from "@/lib/calls";
 import { formatDuration, formatRelative } from "@/lib/date-time";
 import { callsWithin, recentDays } from "@/lib/overview";
 
-export const metadata: Metadata = { title: "Ерөнхий тойм · AI Front-Desk Mongolia" };
+export const metadata: Metadata = { title: "Ерөнхий тойм · CallAI" };
 
 const STATUS_TONE = { active: "badge-blue", completed: "badge-green", failed: "badge-red", handed_off: "badge-amber" } as const;
 const WEEKDAYS = ["Ня", "Да", "Мя", "Лх", "Пү", "Ба", "Бя"];

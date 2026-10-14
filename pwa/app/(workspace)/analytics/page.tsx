@@ -3,7 +3,7 @@ import AnalyticsPage from "@/components/analytics-page";
 import { getCalls } from "@/lib/calls";
 import { getBookings } from "@/lib/bookings";
 
-export const metadata: Metadata = { title: "Тайлан · AI Front-Desk Mongolia" };
+export const metadata: Metadata = { title: "Тайлан · CallAI" };
 
 export default async function Page() {
   const [{ calls, source }, { bookings, source: bookingsSource }] = await Promise.all([getCalls(), getBookings()]);

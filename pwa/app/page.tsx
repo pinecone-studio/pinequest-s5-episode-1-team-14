@@ -7,7 +7,7 @@ import { Icon, type IconName } from "@/components/ui";
 import "./landing.css";
 
 export const metadata: Metadata = {
-  title: "AI Front Desk — нэг ч дуудлага алдахгүй AI хүлээн авагч",
+  title: "CallAI — нэг ч дуудлага алдахгүй AI хүлээн авагч",
   description: "Завгүй үед ч, ажлын цаг дууссан ч AI хүлээн авагч таны бизнесийн утсанд хариулж, асуултад хариулан, цагийг шууд захиална.",
 };
 
@@ -63,7 +63,7 @@ const WAVE = [22, 40, 64, 34, 78, 52, 92, 60, 36, 70, 100, 58, 82, 44, 66, 30, 5
 const CALENDAR = [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 2, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0];
 
 function Brand() {
-  return <Link className="lp-brand" href="/"><Image src="/logo-mark.png" alt="" width={34} height={34} priority /><span><b>AI</b> Front Desk</span></Link>;
+  return <Link className="lp-brand" href="/"><Image src="/logo-mark.png" alt="" width={34} height={34} priority /><span>Call<b>AI</b></span></Link>;
 }
 
 function PrimaryCta() {
@@ -90,7 +90,10 @@ export default function LandingPage() {
         <a href="#start">Эхлэх</a>
         <a href="#faq">Асуулт</a>
       </nav>
-      <Link className="lp-btn lp-btn-small" href="/dashboard">Хянах самбар</Link>
+      <div className="lp-auth">
+        <Link className="lp-btn lp-btn-small lp-btn-quiet" href="/login">Нэвтрэх</Link>
+        <Link className="lp-btn lp-btn-small lp-btn-light" href="/signup">Бүртгүүлэх</Link>
+      </div>
     </header>
 
     <main>
@@ -207,7 +210,7 @@ export default function LandingPage() {
             <Link className="lp-btn lp-btn-primary" href="/dashboard">Хянах самбар үзэх<Icon name="arrow" /></Link>
           </div>
           <div className="lp-board-visual">
-            <div className="lp-frame"><Image src="/landing/calls.png" alt="AI Front Desk хянах самбар: дуудлагын түүх, зорилго, үргэлжилсэн хугацаа, төлөв" width={1280} height={800} sizes="(max-width: 940px) 100vw, 640px" /></div>
+            <div className="lp-frame"><Image src="/landing/calls.png" alt="CallAI хянах самбар: дуудлагын түүх, зорилго, үргэлжилсэн хугацаа, төлөв" width={1280} height={800} sizes="(max-width: 940px) 100vw, 640px" /></div>
           </div>
         </article>
       </section>
@@ -234,6 +237,6 @@ export default function LandingPage() {
       </section>
     </main>
 
-    <footer className="lp-footer"><Brand /><span>© 2026 AI Front Desk Mongolia</span></footer>
+    <footer className="lp-footer"><Brand /><span>© 2026 CallAI</span></footer>
   </div>;
 }

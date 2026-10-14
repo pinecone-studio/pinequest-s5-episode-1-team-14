@@ -18,17 +18,17 @@ const groups: { label: string; items: Item[] }[] = [
     { label: "Мэдээллийн сан", href: "/knowledge", icon: "book" },
     { label: "Тайлан", href: "/analytics", icon: "chart" },
   ] },
-  { label: "Удахгүй", items: [
-    { label: "Туршилтын дуудлага", href: "/demo", icon: "play", soon: true },
-    { label: "Тохиргоо", href: "/settings", icon: "sliders", soon: true },
+  { label: "Тохируулах", items: [
+    { label: "Туршилтын дуудлага", href: "/demo", icon: "play" },
+    { label: "Тохиргоо", href: "/settings", icon: "sliders" },
   ] },
 ];
 
 function Brand() {
-  return <Link className="brand" href="/dashboard"><Image src="/logo-mark.png" alt="" width={36} height={36} priority /><span><b>AI</b> Front Desk</span></Link>;
+  return <Link className="brand" href="/dashboard"><Image src="/logo-mark.png" alt="" width={36} height={36} priority /><span>Call<b>AI</b></span></Link>;
 }
 
-export default function DashboardShell({ children }: { children: React.ReactNode }) {
+export default function DashboardShell({ children, account }: { children: React.ReactNode; account: { email: string; business: string; numbers: string[] } | null }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   // Хуудас солигдох бүрт гар утасны цэсийг хаана.
@@ -59,7 +59,9 @@ export default function DashboardShell({ children }: { children: React.ReactNode
       </nav>
       <div className="sidebar-footer">
         <a href="https://github.com/pinecone-studio/pinequest-s5-episode-1-team-14#local-setup" target="_blank" rel="noreferrer">Ашиглах заавар <Icon name="external" size={12} /><span className="sr-only"> (шинэ цонхонд нээгдэнэ)</span></a>
-        <span>© 2026 AI Front-Desk Mongolia</span>
+        {account && <div className="account"><b>{account.business}</b>{account.numbers.map((number) => <span key={number} className="num">☎ {number}</span>)}<span>{account.email}</span></div>}
+        <form method="post" action="/api/logout"><button className="btn btn-ghost btn-sm login-logout" type="submit">Гарах</button></form>
+        <span>© 2026 CallAI</span>
       </div>
     </aside>
     {open && <button type="button" className="backdrop" aria-label="Цэсийг хаах" onClick={() => setOpen(false)} />}
