@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 
 const MODEL = "gemini-3.8-live";
 
-const TOOLS: Tool[] = [
+export const TOOLS: Tool[] = [
   {
     functionDeclarations: [
       {
@@ -50,7 +50,7 @@ const TOOLS: Tool[] = [
   },
 ];
 
-async function runTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+export async function runTool(name: string, args: Record<string, unknown>): Promise<unknown> {
   try {
     switch (name) {
       case "check_availability":

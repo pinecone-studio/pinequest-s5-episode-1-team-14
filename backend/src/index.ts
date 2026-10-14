@@ -5,6 +5,8 @@ import { WebSocketServer } from "ws";
 import { buildMediaStreamTwiml, handleTwilioMediaStream, resolveCallerPhone } from "./telephony/twilio.js";
 import { isValidTwilioSignature } from "./telephony/twilioSignature.js";
 import { issueStreamToken } from "./telephony/streamTokens.js";
+import { startSipLine } from "./telephony/sip.js";
+import { createCallbackLimiter, normalizeMongolianNumber, startCallback } from "./telephony/callback.js";
 import { CALL_GREETING } from "./ai/callPrompt.js";
 import { cachedUlaw8k } from "./voice/elevenlabs.js";
 import { CallSessionStore } from "./calls/store.js";
@@ -27,6 +29,15 @@ function hasDashboardToken(req: IncomingMessage): boolean {
   if (!expected) return false;
   const digest = (value: string) => createHash("sha256").update(value).digest();
   return timingSafeEqual(digest(req.headers.authorization ?? ""), digest(`Bearer ${expected}`));
+}
+
+const allowCallback = createCallbackLimiter(Number(process.env.CALLBACK_HOURLY_LIMIT ?? 30));
+
+// Twilio /voice-ийг дуудах нийтийн хаяг. Railway домэйнээ өөрөө өгдөг; бусад орчинд PUBLIC_URL-ээр заана.
+function publicBaseUrl(req: IncomingMessage): string {
+  if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL.replace(/\/$/, "");
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+  return `https://${req.headers.host}`;
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {
@@ -80,6 +91,40 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "POST" && req.url === "/api/callback") {
+    // Зөвхөн PWA-гийн сервер дуудна: token-гүй бол хэн ч дуудлага эхлүүлж чадахгүй.
+    if (!hasDashboardToken(req)) {
+      res.writeHead(401);
+      res.end();
+      return;
+    }
+    let phone: string | null = null;
+    try {
+      phone = normalizeMongolianNumber(String((JSON.parse(await readBody(req)) as { phone?: unknown }).phone ?? ""));
+    } catch {
+      phone = null;
+    }
+    if (!phone) {
+      res.writeHead(400);
+      res.end();
+      return;
+    }
+    if (!allowCallback(phone)) {
+      res.writeHead(429);
+      res.end();
+      return;
+    }
+    try {
+      const result = await startCallback(phone, `${publicBaseUrl(req)}/voice`);
+      res.writeHead(result.ok ? 202 : result.reason === "not_configured" ? 503 : 502);
+    } catch (error) {
+      console.error("[callback] алдаа:", error instanceof Error ? error.message : error);
+      res.writeHead(502);
+    }
+    res.end();
+    return;
+  }
+
   if (req.method === "GET" && req.url?.startsWith("/api/")) {
     // Харилцагчийн нэр, утас агуулдаг тул сервер ngrok-оор нээлттэй үед ч token-гүйгээр уншуулахгүй.
     if (!hasDashboardToken(req)) {
@@ -124,5 +169,14 @@ server.listen(PORT, () => {
   // Эхний дуудлага ч мэндчилгээг шууд сонсохын тулд урьдчилан бэлдэнэ.
   if (process.env.VOICE_MODE !== "gemini" && process.env.ELEVENLABS_API_KEY) {
     cachedUlaw8k(CALL_GREETING).catch((error) => console.error("[voice] мэндчилгээг урьдчилан бэлдэж чадсангүй:", error));
+  }
+  // Монголын IP утасны дугаар тохируулсан бол Twilio-гүйгээр шууд дуудлага авна.
+  const { SIP_SERVER, SIP_USER, SIP_PASSWORD } = process.env;
+  if (SIP_SERVER && SIP_USER && SIP_PASSWORD) {
+    startSipLine({
+      server: SIP_SERVER, user: SIP_USER, password: SIP_PASSWORD,
+      port: Number(process.env.SIP_PORT ?? 5060), publicIp: process.env.SIP_PUBLIC_IP || undefined,
+      rtpPortStart: Number(process.env.SIP_RTP_PORT_START ?? 10000),
+    }).catch((error) => console.error("[sip] эхлүүлж чадсангүй:", error instanceof Error ? error.message : error));
   }
 });
