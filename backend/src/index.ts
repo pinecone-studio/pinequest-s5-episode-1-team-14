@@ -8,7 +8,7 @@ import { issueStreamToken } from "./telephony/streamTokens.js";
 import { startSipLine, type SipLine } from "./telephony/sip.js";
 import { LineStore, type Line } from "./telephony/lines.js";
 import { createCallbackLimiter, normalizeMongolianNumber, startCallback } from "./telephony/callback.js";
-import { ACK_PHRASES, CALL_GREETING } from "./ai/callPrompt.js";
+import { ACK_PHRASES, greetingFor } from "./ai/callPrompt.js";
 import { WAIT_TEXT } from "./ai/geminiTurns.js";
 import { cachedUlaw8k } from "./voice/elevenlabs.js";
 import { CallSessionStore } from "./calls/store.js";
@@ -255,12 +255,12 @@ const server = createServer(async (req, res) => {
       body = {};
     }
     if (req.url === "/api/settings") {
-      const result = accounts.updateBusiness(account.businessId, { name: body.name, voice: body.voice });
+      const result = accounts.updateBusiness(account.businessId, { name: body.name, voice: body.voice, greeting: body.greeting });
       if (result === "invalid") {
         res.writeHead(400);
         res.end();
       } else {
-        sendJson(res, 200, { name: result.name, voice: result.voice ?? null });
+        sendJson(res, 200, { name: result.name, voice: result.voice ?? null, greeting: result.greeting ?? "" });
       }
       return;
     }
@@ -301,7 +301,8 @@ const server = createServer(async (req, res) => {
         res.writeHead(429);
       } else {
         const ok = await sipLines.get(account.businessId)!.dial(phone.replace(/^\+976/, ""), {
-          direction: "reminder", greeting: reminderGreeting(booking), instruction: reminderInstruction(booking),
+          direction: "reminder", greeting: reminderGreeting(booking, new Date(), accounts.businesses().find((item) => item.id === account.businessId)?.name),
+          instruction: reminderInstruction(booking),
         });
         res.writeHead(ok ? 202 : 502);
       }
@@ -329,7 +330,7 @@ const server = createServer(async (req, res) => {
     if (req.url === "/api/settings") {
       const business = accounts.businesses().find((item) => item.id === account.businessId);
       sendJson(res, 200, {
-        name: business?.name ?? "", voice: business?.voice ?? null,
+        name: business?.name ?? "", voice: business?.voice ?? null, greeting: business?.greeting ?? "",
         voices: voiceOptions().map(({ key, label }) => ({ key, label })), numbers: lineStore.numbersFor(account.businessId),
       });
       return;
@@ -376,7 +377,8 @@ server.listen(PORT, () => {
   console.log(`AI Front-Desk сервер ${PORT} порт дээр ажиллаж байна`);
   // Эхний дуудлага ч мэндчилгээг шууд сонсохын тулд урьдчилан бэлдэнэ.
   if (process.env.VOICE_MODE !== "gemini" && process.env.ELEVENLABS_API_KEY) {
-    for (const phrase of [CALL_GREETING, ...ACK_PHRASES, WAIT_TEXT]) {
+    const greetings = accounts.businesses().filter((business) => !business.voice).map((business) => business.greeting ?? greetingFor(business.name));
+    for (const phrase of [...greetings, ...ACK_PHRASES, WAIT_TEXT]) {
       cachedUlaw8k(phrase).catch((error) => console.error("[voice] тогтмол өгүүлбэрийг урьдчилан бэлдэж чадсангүй:", error));
     }
   }

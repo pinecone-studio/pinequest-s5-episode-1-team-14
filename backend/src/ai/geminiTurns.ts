@@ -24,14 +24,38 @@ const MIN_VOICED_FRAMES = 8; // үүнээс богино бол чимээ гэ
 const MAX_FRAMES = 20_000 / FRAME_MS;
 const MAX_TOOL_ROUNDS = 3;
 const FIRST_CHUNK_TIMEOUT_MS = 7000;
-export const WAIT_TEXT = "Нэг хором.";
-const RETRY_TEXT = "Уучлаарай, дахин хэлж өгнө үү?";
+export const WAIT_TEXT = "За, түр хүлээгээрэй.";
+export const ANSWER_ACK = "За.";
+// Gemini-ийн эхний үг ~1.3с-д ирдэг тул энэ хугацаанаас удаашрахад л богино үг хэлнэ.
+const ANSWER_ACK_MS = 1600;
+const QUESTION_ACK_MS = 2200;
+
+// Зочны хэлсэн нь асуулт уу ("хэд вэ?", "байгаа юу", "хаана"): асуултын өмнө "За" гэхгүй.
+export function isQuestion(text: string): boolean {
+  const clean = text.trim().toLowerCase();
+  return /[?？]\s*$/u.test(clean) || /(?:^|\s)(?:уу|үү|вэ|бэ|юу|бол)[\s.!]*$/u.test(clean) ||
+    /(?:^|\s)(?:хэд|хэдэн|хэзээ|хаана|яаж|ямар|юу|хэн|аль)(?:\p{L}*)(?=\s|$)/u.test(clean);
+}
+// Чимэгэ хоосон буцаасан ч дуутай хэсэг нь үүнээс урт бол чимээ биш яриа гэж үзээд Gemini-ээр сонсоно.
+// Нийт урт тохирохгүй: урьдчилсан 0.3с, төгсгөлийн 0.48с чимээгүй үргэлж багтдаг.
+const MIN_FALLBACK_VOICED_SECONDS = 0.3;
+
+// Дуутай (чимээгүй биш) 20мс хэсгүүдийн нийт урт, секундээр.
+export function voicedSeconds(samples: Int16Array): number {
+  const frame = (SAMPLE_RATE * FRAME_MS) / 1000;
+  let voiced = 0;
+  for (let offset = 0; offset + frame <= samples.length; offset += frame) {
+    if (rms(samples.subarray(offset, offset + frame)) > END_RMS) voiced++;
+  }
+  return (voiced * FRAME_MS) / 1000;
+}
+const RETRY_TEXT = "Уучлаарай, дахиад нэг удаа хэлээд өгөөч?";
 
 const TEXT_INPUT_INSTRUCTION = `Зочны яриаг таних систем текст болгож өгнө. Утасны дуу тул үг алдаатай
 танигдсан байж болно: хамгийн магадлалтай утгаар нь ойлгож хариул. Тоог үсгээр бичсэн ч ("7 цагт") ойлго.
 Хариулт утсаар уншигдах тул богино, тэмдэглэгээгүй энгийн өгүүлбэрээр бич.
-Систем таны хариултын өмнө "За" эсвэл "Ойлголоо" гэж аль хэдийн хэлсэн: хариултаа эдгээр үгээр бүү
-эхлүүл, шууд гол утгаа хэл.`;
+"За"-г зөвхөн зочны хариултыг (нэр, цаг, хүний тоо) хүлээж авахад хэрэглэ; асуултад хариулахдаа бүү
+хэрэглэ. "Ойлголоо" гэж бүү хэл. Хариулт бүрийг "За"-аар бүү эхлүүл.`;
 
 const TURN_FORMAT_INSTRUCTION = `Хариултын хэлбэр (ЗААВАЛ): зочны яриа дуугаар ирнэ. Хариултаа ХОЁР мөрөөр бич.
 1-р мөр: зочны хэлснийг яг сонссоноороо, монгол кириллээр, <<...>> хаалтанд. Жишээ: <<Бууз хэдэн төгрөг вэ?>>
@@ -153,6 +177,7 @@ export async function createGeminiTurnSession(
     greeting: context.greeting,
     extra: context.extra,
     businessName: context.businessName,
+    bookingEnabled: !context.businessId || context.businessId === DEFAULT_BUSINESS_ID,
   });
   // Чимэгэ текст өгсөн үед загвар зөвхөн хариулна; дуу шууд өгөх үед сонссоноо эхний мөрөнд бичнэ.
   const instructions = { text: `${base}\n\n${TEXT_INPUT_INSTRUCTION}`, audio: `${base}\n\n${TURN_FORMAT_INSTRUCTION}` };
@@ -169,13 +194,14 @@ export async function createGeminiTurnSession(
   // Шинэ яриа ирэх бүрт нэмэгдэнэ: өмнөх, дуусаагүй хариултыг хүчингүй болгоно.
   let turn = 0;
 
-  async function generate(model: string, systemInstruction: string, contents: Content[], id: number, onDelta: (text: string) => void): Promise<Part[]> {
+  // allowTools=false: хэрэгслийн хязгаарт хүрсэн үед загварыг заавал текстээр хариулуулна.
+  async function generate(model: string, systemInstruction: string, contents: Content[], id: number, onDelta: (text: string) => void, allowTools = true): Promise<Part[]> {
     // Загвар гацвал (ачаалал, хязгаар) зочныг чимээгүй хүлээлгэхгүйн тулд эхний хариуг хязгаартай хүлээнэ.
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), FIRST_CHUNK_TIMEOUT_MS);
     const stream = await ai.models.generateContentStream({
       model, contents,
-      config: { systemInstruction, tools: TOOLS, thinkingConfig: { thinkingBudget: 0 }, abortSignal: controller.signal },
+      config: { systemInstruction, ...(allowTools ? { tools: TOOLS } : {}), thinkingConfig: { thinkingBudget: 0 }, abortSignal: controller.signal },
     });
     const parts: Part[] = [];
     for await (const chunk of stream) {
@@ -204,19 +230,33 @@ export async function createGeminiTurnSession(
         console.error("[turns] Чимэгэ алдаа, Gemini-ээр сонсоно:", error instanceof Error ? error.message : error);
       }
       if (closed) return;
-      // Хоосон текст нь амьсгал, ханиалга мэт чимээ: AI-г таслахгүй, хариулахгүй.
+      // Хоосон текст: богино бол амьсгал, ханиалга мэт чимээ (AI-г таслахгүй, хариулахгүй). Урт бол
+      // Чимэгэ "тав", "дөрвүүлээ" мэт ганц үгийн хариултыг таньж чадаагүй байж болох тул дууг нь Gemini-д
+      // өгнө: ярианы өмнөх хэсгийг мэддэг тул ойлгоно, ойлгохгүй бол дахин хэлэхийг хүснэ. Чимээгүй өнгөрөхгүй.
       if (transcript === "" || (transcript && !/[\p{L}\p{N}]{2}/u.test(transcript))) {
-        console.log("[turns] яриа танигдсангүй (чимээ) — алгасав");
-        return;
+        const voiced = voicedSeconds(utterance);
+        if (voiced < MIN_FALLBACK_VOICED_SECONDS) {
+          console.log(`[turns] яриа танигдсангүй (чимээ, дуутай ${voiced.toFixed(2)}с) — алгасав`);
+          return;
+        }
+        console.log(`[turns] Чимэгэ таньсангүй (дуутай ${voiced.toFixed(2)}с) — Gemini-ээр сонсоно`);
+        transcript = null;
       }
     }
     // Жинхэнэ яриа: AI ярьж байвал зогсооно.
     if (turn) callbacks.onInterrupted?.();
     const id = ++turn;
-    // Яриа танигдсан даруйд богино үг хэлнэ: хариулт бэлдэх ~2с-д зочин чимээгүй хүлээхгүй.
-    if (transcript) callbacks.onAck?.();
     let heard = "";
     let reply = "";
+    // Хариулт удаашрах үед л богино үг хэлнэ: зочин хариулт өгсөн бол "За", асуусан бол "За, түр хүлээгээрэй".
+    // Хариулт хурдан бэлэн бол юу ч нэмэхгүй: үргэлж "За" гэх нь хиймэл, асуултын өмнө утгагүй.
+    let ackTimer: NodeJS.Timeout | undefined;
+    if (transcript) {
+      const question = isQuestion(transcript);
+      ackTimer = setTimeout(() => {
+        if (!closed && id === turn && !reply) callbacks.onAck?.(question ? WAIT_TEXT : ANSWER_ACK);
+      }, question ? QUESTION_ACK_MS : ANSWER_ACK_MS);
+    }
     let firstAt = 0;
     const parse = createReplyParser(
       (text) => {
@@ -238,6 +278,7 @@ export async function createGeminiTurnSession(
     }
     const onDelta = transcript
       ? (delta: string) => {
+        clearTimeout(ackTimer);
         if (!firstAt) firstAt = Date.now() - startedAt;
         reply += delta;
         callbacks.onText?.(delta);
@@ -253,7 +294,8 @@ export async function createGeminiTurnSession(
       let parts: Part[] | null = null;
       for (const model of MODELS) {
         try {
-          parts = await generate(model, systemInstruction, [...history, ...turnContents], id, onDelta);
+          // Сүүлийн эргэлтэд хэрэгсэлгүй: "түр хүлээгээрэй" гээд чимээгүй болохгүйн тулд олсон мэдээллээрээ хариулна.
+          parts = await generate(model, systemInstruction, [...history, ...turnContents], id, onDelta, round < MAX_TOOL_ROUNDS);
           break;
         } catch (error) {
           console.error(`[turns] ${model} алдаа:`, error instanceof Error ? error.message.slice(0, 160) : error);

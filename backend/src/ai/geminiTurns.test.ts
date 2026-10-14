@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createReplyParser, createUtteranceDetector, normalizeGain, toUlaanbaatarTimes } from "./geminiTurns.js";
+import { createReplyParser, createUtteranceDetector, isQuestion, normalizeGain, toUlaanbaatarTimes, voicedSeconds } from "./geminiTurns.js";
 
 const frame = (level: number) => new Int16Array(320).fill(level);
 
@@ -55,4 +55,17 @@ test("calendar times are handed to the model in Ulaanbaatar time", () => {
     timeZone: "Asia/Ulaanbaatar", slots: [{ startTime: "2026-10-14T19:00:00+08:00", endTime: "2026-10-15T01:30:00+08:00" }], note: "Z",
   });
   assert.equal(toUlaanbaatarTimes(undefined), null);
+});
+
+test("voiced length ignores the silent padding around an utterance", () => {
+  const speech = Int16Array.from({ length: 16_000 * 0.4 }, (_, n) => Math.round(3000 * Math.sin(n / 5)));
+  const padded = new Int16Array(16_000 * 1.2);
+  padded.set(speech, 16_000 * 0.3);
+  assert.ok(Math.abs(voicedSeconds(padded) - 0.4) < 0.03);
+  assert.equal(voicedSeconds(new Int16Array(16_000)), 0);
+});
+
+test("questions are told apart from answers so we never say За before answering a question", () => {
+  for (const text of ["Хорхог хэд вэ?", "Зогсоол байгаа юу", "Хаана байрладаг вэ", "Ням гарагт ажилладаг уу", "Ямар хоол байна"]) assert.equal(isQuestion(text), true, text);
+  for (const text of ["Маргааш.", "Тав", "Баярзул", "Орой долоо хагаст", "Тийм ээ"]) assert.equal(isQuestion(text), false, text);
 });

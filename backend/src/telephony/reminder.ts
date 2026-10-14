@@ -1,6 +1,7 @@
 // Захиалга сануулах дуудлага: AI зочин руу залгаж, захиалгаа ирэх эсэхийг баталгаажуулна.
 
 import { CALENDAR_TIME_ZONE, type Booking } from "../calendar/googleCalendar.js";
+import { withSuffix } from "../ai/mongolianSuffix.js";
 
 const dayKey = new Intl.DateTimeFormat("en-CA", { timeZone: CALENDAR_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" });
 const timeOfDay = new Intl.DateTimeFormat("en-GB", { timeZone: CALENDAR_TIME_ZONE, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
@@ -21,8 +22,8 @@ export function localIso(iso: string): string {
   return `${dayKey.format(new Date(iso))}T${timeOfDay.format(new Date(iso))}:00+08:00`;
 }
 
-export function reminderGreeting(booking: Booking, now = new Date()): string {
-  return `Сайн байна уу, ${booking.customerName}? Би рестораны AI туслах байна. Таны ${spokenTime(booking.startTime, now)} цагийн ширээ захиалгыг сануулах гэж залгалаа. Та ирэх хэвээр үү?`;
+export function reminderGreeting(booking: Booking, now = new Date(), businessName = "Ресторан"): string {
+  return `Сайн байна уу, ${booking.customerName} мөн үү? ${withSuffix(businessName, "ablative")} холбогдож байна. Таны ${spokenTime(booking.startTime, now)} цагийн ширээ захиалгыг сануулах гэж залгалаа. Та ирэх хэвээрээ юу?`;
 }
 
 export function reminderInstruction(booking: Booking, now = new Date()): string {

@@ -8,12 +8,12 @@ import { getActiveVoiceId } from "./settings.js";
 // eleven_v4_turbo: эхний дуу ~0.25с (eleven_v4 ~1с), утасны ярианд хурд чухал.
 const DEFAULT_MODEL_ID = "eleven_v4_turbo";
 
-// Сэтгэл хөдлөлтэй, хүн шиг аялга: тогтвортой байдал бага, хэв маяг дунд (жишээ дуунуудаас "C"-г сонгосон).
+// Аялгатай ч хэмнэл нь тогтвортой: 0.3/0.4-д монгол үгсийг санамсаргүй сунгаж, түргэсгэж байсан.
 // VOICE_STABILITY, VOICE_STYLE-ээр солино.
 const voiceSettings = () => ({
-  stability: Number(process.env.VOICE_STABILITY ?? 0.3),
+  stability: Number(process.env.VOICE_STABILITY ?? 0.45),
   similarityBoost: 0.75,
-  style: Number(process.env.VOICE_STYLE ?? 0.4),
+  style: Number(process.env.VOICE_STYLE ?? 0.15),
   useSpeakerBoost: true,
 });
 
