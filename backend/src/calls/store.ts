@@ -16,6 +16,8 @@ export type CallSession = {
   status: (typeof CALL_STATUSES)[number];
   bookingId: string | null;
   bookingCreated: boolean;
+  // Аль бизнесийн дугаарт ирсэн. Байхгүй бол үндсэн бизнесийнх.
+  businessId?: string;
 };
 
 function fields(value: unknown, allowed: string[]): Record<string, unknown> {
@@ -37,7 +39,7 @@ function timestamp(value: unknown): number {
 }
 
 function validateCall(value: unknown): asserts value is CallSession {
-  const call = fields(value, ["id", "callerPhone", "startedAt", "endedAt", "duration", "intent", "status", "bookingId", "bookingCreated"]);
+  const call = fields(value, ["id", "callerPhone", "startedAt", "endedAt", "duration", "intent", "status", "bookingId", "bookingCreated", "businessId"]);
   if (!validId(call.id)) throw new TypeError("Call id must be non-empty text of at most 200 characters without padding or controls");
   if (call.callerPhone !== null && (typeof call.callerPhone !== "string" || !/^(?:\d{8}|\+[1-9]\d{7,14})$/.test(call.callerPhone))) {
     throw new TypeError("callerPhone must be null, 8 local digits or an international number with + and 8-15 digits");
@@ -45,6 +47,7 @@ function validateCall(value: unknown): asserts value is CallSession {
   if (call.intent !== null && !CALL_INTENTS.some((intent) => intent === call.intent)) throw new TypeError("Invalid call intent");
   if (!CALL_STATUSES.some((status) => status === call.status)) throw new TypeError("Invalid call status");
   if (call.bookingId !== null && !validId(call.bookingId)) throw new TypeError("Invalid booking id");
+  if (call.businessId !== undefined && !validId(call.businessId)) throw new TypeError("Invalid business id");
   if (call.bookingCreated !== (call.bookingId !== null)) throw new TypeError("bookingCreated must match the booking link");
   const start = timestamp(call.startedAt);
   if (call.status === "active") {
@@ -76,8 +79,9 @@ export class CallSessionStore {
     return this.list().find((call) => call.id === id);
   }
 
-  start(input: { id: string; callerPhone: string | null; startedAt: string }): CallSession {
-    const data = fields(input, ["id", "callerPhone", "startedAt"]);
+  start(input: { id: string; callerPhone: string | null; startedAt: string; businessId?: string }): CallSession {
+    const data = fields(input, ["id", "callerPhone", "startedAt", "businessId"]);
+    if (data.businessId === undefined) delete data.businessId;
     const call = { ...data, endedAt: null, duration: 0, intent: null, status: "active", bookingId: null, bookingCreated: false };
     validateCall(call);
     const calls = this.list();
@@ -112,6 +116,13 @@ export class CallSessionStore {
       }
       return { ...call, ...end, duration: Math.floor((endedAt - timestamp(call.startedAt)) / 1000) };
     });
+  }
+
+  // Сервер унтарч асахад дуусаагүй үлдсэн дуудлагуудыг амжилтгүй гэж хаана.
+  closeActive(endedAt: string): number {
+    const active = this.list().filter((call) => call.status === "active");
+    active.forEach((call) => this.finish(call.id, { status: "failed", endedAt }));
+    return active.length;
   }
 
   private change(id: string, apply: (call: CallSession) => unknown): CallSession {

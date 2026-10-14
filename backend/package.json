@@ -10,10 +10,12 @@
     "lint": "eslint src --ext .ts",
     "test:gemini-mn": "tsx src/ai/test-live-mongolian.ts",
     "test:knowledge": "tsx --test src/knowledge/store.test.ts src/knowledge/mongolianMorphology.test.ts src/knowledge/rag.test.ts",
-    "test:calendar": "tsx --test src/calendar/googleCalendar.test.ts src/calendar/booking.test.ts src/calendar/listBookings.test.ts",
+    "test:calendar": "tsx --test src/calendar/googleCalendar.test.ts src/calendar/booking.test.ts src/calendar/listBookings.test.ts src/calendar/cancelBooking.test.ts src/calendar/tables.test.ts",
     "test:calls": "tsx --test src/calls/store.test.ts src/calls/intent.test.ts src/calls/transcript.test.ts",
-    "test:call-flow": "tsx --test src/ai/callPrompt.test.ts src/ai/geminiTurns.test.ts src/telephony/sentences.test.ts src/telephony/twilio.test.ts",
-    "test:telephony": "tsx --test src/telephony/twilioSignature.test.ts src/telephony/streamTokens.test.ts src/telephony/callback.test.ts src/telephony/sip.test.ts",
+    "test:call-flow": "tsx --test src/ai/callPrompt.test.ts src/ai/geminiTurns.test.ts src/ai/chimege.test.ts src/telephony/sentences.test.ts src/telephony/twilio.test.ts",
+    "test:accounts": "tsx --test src/accounts/store.test.ts src/telephony/lines.test.ts",
+    "line:add": "tsx src/telephony/addLine.ts",
+    "test:telephony": "tsx --test src/telephony/twilioSignature.test.ts src/telephony/streamTokens.test.ts src/telephony/callback.test.ts src/telephony/sip.test.ts src/telephony/reminder.test.ts src/voice/spokenNumbers.test.ts src/voice/timeStretch.test.ts",
     "voice:set": "tsx src/voice/set-voice.ts"
   },
   "dependencies": {

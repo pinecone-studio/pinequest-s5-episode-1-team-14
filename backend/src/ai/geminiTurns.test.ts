@@ -11,8 +11,8 @@ test("an utterance is returned once the caller goes quiet, with a little audio b
   let utterance: Int16Array | null = null;
   for (let i = 0; i < 40 && !utterance; i++) utterance = detect(frame(0));
   assert.ok(utterance);
-  // 15 хэсэг өмнөх + 40 яриа + 32 чимээгүй (эхлэлийг илрүүлсэн хэсгүүд өмнөх хэсэгт орсон).
-  assert.equal(utterance.length, (12 + 40 + 32) * 320);
+  // 12 өмнөх + 40 яриа + 24 чимээгүй (эхлэлийг илрүүлсэн 3 хэсэг өмнөхөд тоологдсон).
+  assert.equal(utterance.length, (12 + 40 + 24) * 320);
   assert.equal(utterance[0], 0);
   assert.equal(utterance[12 * 320], 3000);
 });

@@ -5,24 +5,51 @@ import { WebSocketServer } from "ws";
 import { buildMediaStreamTwiml, handleTwilioMediaStream, resolveCallerPhone } from "./telephony/twilio.js";
 import { isValidTwilioSignature } from "./telephony/twilioSignature.js";
 import { issueStreamToken } from "./telephony/streamTokens.js";
-import { startSipLine } from "./telephony/sip.js";
+import { startSipLine, type SipLine } from "./telephony/sip.js";
+import { LineStore, type Line } from "./telephony/lines.js";
 import { createCallbackLimiter, normalizeMongolianNumber, startCallback } from "./telephony/callback.js";
-import { CALL_GREETING } from "./ai/callPrompt.js";
+import { ACK_PHRASES, CALL_GREETING } from "./ai/callPrompt.js";
+import { WAIT_TEXT } from "./ai/geminiTurns.js";
 import { cachedUlaw8k } from "./voice/elevenlabs.js";
 import { CallSessionStore } from "./calls/store.js";
 import { TranscriptStore } from "./calls/transcript.js";
 import { BusinessKnowledgeStore } from "./knowledge/store.js";
 import { listBookings } from "./calendar/googleCalendar.js";
+import { reminderGreeting, reminderInstruction } from "./telephony/reminder.js";
+import { AccountStore, belongsTo, DEFAULT_BUSINESS_ID, voiceOptions, createSessionToken, readSessionToken, type Account } from "./accounts/store.js";
+import { createAttemptLimiter } from "./accounts/limiter.js";
 
 const PORT = Number(process.env.PORT ?? 8080);
 
-// Хянах самбарын (PWA) зөвхөн унших өгөгдөл.
-const DASHBOARD_ROUTES: Record<string, () => unknown> = {
-  "/api/calls": () => new CallSessionStore().list(),
-  "/api/transcripts": () => new TranscriptStore().all(),
-  "/api/knowledge": () => new BusinessKnowledgeStore().list({ activeOnly: false }),
-  "/api/bookings": () => listBookings(),
+// Хянах самбарын (PWA) зөвхөн унших өгөгдөл: нэвтэрсэн хэрэглэгчийн бизнесийнх л.
+const businessCalls = (businessId: string) => new CallSessionStore().list().filter(belongsTo(businessId));
+const DASHBOARD_ROUTES: Record<string, (businessId: string) => unknown> = {
+  "/api/calls": businessCalls,
+  "/api/transcripts": (businessId) => {
+    const ids = new Set(businessCalls(businessId).map((call) => call.id));
+    return Object.fromEntries(Object.entries(new TranscriptStore().all()).filter(([callId]) => ids.has(callId)));
+  },
+  "/api/knowledge": (businessId) => new BusinessKnowledgeStore().list({ activeOnly: false }).filter(belongsTo(businessId)),
+  "/api/bookings": async (businessId) => (await listBookings()).filter(belongsTo(businessId)),
 };
+
+const accounts = new AccountStore();
+// Нууц үг таах, олноор бүртгүүлэхийг IP-ээр хязгаарлана (IP-г PWA X-Client-IP-ээр дамжуулна).
+const loginLimiter = createAttemptLimiter(10, 10 * 60_000);
+const signupLimiter = createAttemptLimiter(5, 60 * 60_000);
+
+// PWA-ийн service token дээр нэмээд хэрэглэгчийн session (X-Session) шаардана.
+function sessionAccount(req: IncomingMessage): Account | undefined {
+  const accountId = readSessionToken(req.headers["x-session"]);
+  return accountId ? accounts.get(accountId) : undefined;
+}
+
+const clientIp = (req: IncomingMessage) => String(req.headers["x-client-ip"] ?? "unknown").slice(0, 64);
+
+function sendJson(res: import("node:http").ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(body));
+}
 
 function hasDashboardToken(req: IncomingMessage): boolean {
   const expected = process.env.DASHBOARD_API_TOKEN;
@@ -31,7 +58,11 @@ function hasDashboardToken(req: IncomingMessage): boolean {
   return timingSafeEqual(digest(req.headers.authorization ?? ""), digest(`Bearer ${expected}`));
 }
 
-const allowCallback = createCallbackLimiter(Number(process.env.CALLBACK_HOURLY_LIMIT ?? 30));
+// Бизнес бүрийн SIP шугам (эхний дугаар): гадагш залгахад тухайн бизнесийн дугаар харагдана.
+const sipLines = new Map<string, SipLine>();
+const lineStore = new LineStore();
+// Гадагш дуудлага (буцааж залгах, сануулах) нийтдээ цагт 5: нээлттэй маягтаар их төлбөр гаргуулахаас хамгаална.
+const allowCallback = createCallbackLimiter(Number(process.env.CALLBACK_HOURLY_LIMIT) || 5);
 
 // Twilio /voice-ийг дуудах нийтийн хаяг. Railway домэйнээ өөрөө өгдөг; бусад орчинд PUBLIC_URL-ээр заана.
 function publicBaseUrl(req: IncomingMessage): string {
@@ -115,11 +146,168 @@ const server = createServer(async (req, res) => {
       return;
     }
     try {
-      const result = await startCallback(phone, `${publicBaseUrl(req)}/voice`);
-      res.writeHead(result.ok ? 202 : result.reason === "not_configured" ? 503 : 502);
+      const sipLine = sipLines.get(DEFAULT_BUSINESS_ID);
+      if (sipLine) {
+        res.writeHead(await sipLine.dial(phone.replace(/^\+976/, "")) ? 202 : 502);
+      } else {
+        const result = await startCallback(phone, `${publicBaseUrl(req)}/voice`);
+        res.writeHead(result.ok ? 202 : result.reason === "not_configured" ? 503 : 502);
+      }
     } catch (error) {
       console.error("[callback] алдаа:", error instanceof Error ? error.message : error);
       res.writeHead(502);
+    }
+    res.end();
+    return;
+  }
+
+  if (req.method === "POST" && (req.url === "/api/auth/signup" || req.url === "/api/auth/login")) {
+    if (!hasDashboardToken(req)) {
+      res.writeHead(401);
+      res.end();
+      return;
+    }
+    const signup = req.url === "/api/auth/signup";
+    const ip = clientIp(req);
+    if (!(signup ? signupLimiter : loginLimiter).allowed(ip)) {
+      res.writeHead(429);
+      res.end();
+      return;
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      body = JSON.parse(await readBody(req)) as Record<string, unknown>;
+    } catch {
+      body = {};
+    }
+    if (signup) {
+      signupLimiter.fail(ip);
+      const result = accounts.signup({ email: body.email, password: body.password, businessName: body.businessName });
+      if (result === "invalid" || result === "exists") {
+        res.writeHead(result === "invalid" ? 400 : 409);
+        res.end();
+        return;
+      }
+      console.log("[auth] шинэ бүртгэл үүслээ");
+      sendJson(res, 201, { ...createSessionToken(result.id), account: accounts.describe(result) });
+      return;
+    }
+    const account = accounts.login(body.email, body.password);
+    if (!account) {
+      loginLimiter.fail(ip);
+      res.writeHead(401);
+      res.end();
+      return;
+    }
+    sendJson(res, 200, { ...createSessionToken(account.id), account: accounts.describe(account) });
+    return;
+  }
+
+  // Мэдлэгийн сан: нэвтэрсэн хэрэглэгч зөвхөн өөрийн бизнесийн мэдээллийг нэмж, засаж, устгана.
+  const knowledgeId = req.url?.match(/^\/api\/knowledge(?:\/([\w-]{1,100}))?$/);
+  if (knowledgeId && (req.method === "POST" || req.method === "DELETE")) {
+    const account = hasDashboardToken(req) ? sessionAccount(req) : undefined;
+    if (!account) {
+      res.writeHead(401);
+      res.end();
+      return;
+    }
+    const store = new BusinessKnowledgeStore();
+    const owned = (id: unknown) => typeof id === "string" && [store.get(id)].some((item) => item && belongsTo(account.businessId)(item));
+    try {
+      if (req.method === "DELETE") {
+        res.writeHead(knowledgeId[1] && owned(knowledgeId[1]) && store.delete(knowledgeId[1]) ? 204 : 404);
+        res.end();
+        return;
+      }
+      const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
+      const { id, category, title, content, price, active } = body;
+      if (id !== undefined && !owned(id)) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      const item = store.save({
+        ...(id === undefined ? {} : { id }), category, title, content, active: active === true,
+        ...(price === undefined || price === null ? {} : { price }), businessId: account.businessId,
+      });
+      sendJson(res, 200, item);
+    } catch (error) {
+      console.error("[knowledge] хадгалж чадсангүй:", error instanceof Error ? error.message : error);
+      res.writeHead(400);
+      res.end();
+    }
+    return;
+  }
+
+  // Тохиргоо (нэр, дуу) ба туршилтын дуудлага: нэвтэрсэн хэрэглэгчийн бизнест.
+  if (req.method === "POST" && (req.url === "/api/settings" || req.url === "/api/test-call")) {
+    const account = hasDashboardToken(req) ? sessionAccount(req) : undefined;
+    if (!account) {
+      res.writeHead(401);
+      res.end();
+      return;
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      body = JSON.parse(await readBody(req)) as Record<string, unknown>;
+    } catch {
+      body = {};
+    }
+    if (req.url === "/api/settings") {
+      const result = accounts.updateBusiness(account.businessId, { name: body.name, voice: body.voice });
+      if (result === "invalid") {
+        res.writeHead(400);
+        res.end();
+      } else {
+        sendJson(res, 200, { name: result.name, voice: result.voice ?? null });
+      }
+      return;
+    }
+    // Туршилтын дуудлага: бизнесийн өөрийн дугаараас, дугааргүй бол аль нэг шугамаас тухайн бизнесийн AI залгана.
+    const phone = normalizeMongolianNumber(String(body.phone ?? ""));
+    const line = sipLines.get(account.businessId) ?? sipLines.values().next().value;
+    if (!phone) {
+      res.writeHead(400);
+    } else if (!line) {
+      res.writeHead(503);
+    } else if (!allowCallback(phone)) {
+      res.writeHead(429);
+    } else {
+      console.log("[test-call] туршилтын дуудлага эхэллээ");
+      res.writeHead(await line.dial(phone.replace(/^\+976/, ""), { businessId: account.businessId }) ? 202 : 502);
+    }
+    res.end();
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/api/remind") {
+    // Захиалга сануулах дуудлага: dashboard-аас захиалгын id-аар, зөвхөн өөрийн бизнесийнх.
+    const account = hasDashboardToken(req) ? sessionAccount(req) : undefined;
+    if (!account) {
+      res.writeHead(401);
+      res.end();
+      return;
+    }
+    try {
+      const { bookingId } = JSON.parse(await readBody(req)) as { bookingId?: unknown };
+      const booking = (await listBookings()).filter(belongsTo(account.businessId)).find((item) => item.id === bookingId);
+      const phone = booking ? normalizeMongolianNumber(booking.phone) : null;
+      if (!booking || !phone) {
+        res.writeHead(booking ? 422 : 404);
+      } else if (!sipLines.has(account.businessId)) {
+        res.writeHead(503);
+      } else if (!allowCallback(phone)) {
+        res.writeHead(429);
+      } else {
+        const ok = await sipLines.get(account.businessId)!.dial(phone.replace(/^\+976/, ""), {
+          direction: "reminder", greeting: reminderGreeting(booking), instruction: reminderInstruction(booking),
+        });
+        res.writeHead(ok ? 202 : 502);
+      }
+    } catch (error) {
+      console.error("[remind] алдаа:", error instanceof Error ? error.message : error);
+      res.writeHead(400);
     }
     res.end();
     return;
@@ -132,6 +320,24 @@ const server = createServer(async (req, res) => {
       res.end();
       return;
     }
+    const account = sessionAccount(req);
+    if (!account) {
+      res.writeHead(401);
+      res.end();
+      return;
+    }
+    if (req.url === "/api/settings") {
+      const business = accounts.businesses().find((item) => item.id === account.businessId);
+      sendJson(res, 200, {
+        name: business?.name ?? "", voice: business?.voice ?? null,
+        voices: voiceOptions().map(({ key, label }) => ({ key, label })), numbers: lineStore.numbersFor(account.businessId),
+      });
+      return;
+    }
+    if (req.url === "/api/me") {
+      sendJson(res, 200, { ...accounts.describe(account), numbers: lineStore.numbersFor(account.businessId) });
+      return;
+    }
     const load = DASHBOARD_ROUTES[req.url];
     if (!load) {
       res.writeHead(404);
@@ -139,7 +345,7 @@ const server = createServer(async (req, res) => {
       return;
     }
     try {
-      const body = JSON.stringify(await load());
+      const body = JSON.stringify(await load(account.businessId));
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(body);
     } catch (error) {
@@ -165,18 +371,31 @@ server.on("upgrade", (req, socket, head) => {
 });
 
 server.listen(PORT, () => {
+  const closed = new CallSessionStore().closeActive(new Date().toISOString());
+  if (closed) console.log(`[calls] өмнө дуусаагүй ${closed} дуудлагыг хаалаа`);
   console.log(`AI Front-Desk сервер ${PORT} порт дээр ажиллаж байна`);
   // Эхний дуудлага ч мэндчилгээг шууд сонсохын тулд урьдчилан бэлдэнэ.
   if (process.env.VOICE_MODE !== "gemini" && process.env.ELEVENLABS_API_KEY) {
-    cachedUlaw8k(CALL_GREETING).catch((error) => console.error("[voice] мэндчилгээг урьдчилан бэлдэж чадсангүй:", error));
+    for (const phrase of [CALL_GREETING, ...ACK_PHRASES, WAIT_TEXT]) {
+      cachedUlaw8k(phrase).catch((error) => console.error("[voice] тогтмол өгүүлбэрийг урьдчилан бэлдэж чадсангүй:", error));
+    }
   }
-  // Монголын IP утасны дугаар тохируулсан бол Twilio-гүйгээр шууд дуудлага авна.
-  const { SIP_SERVER, SIP_USER, SIP_PASSWORD } = process.env;
-  if (SIP_SERVER && SIP_USER && SIP_PASSWORD) {
+  // Монголын IP утасны дугаар бүрээр Twilio-гүйгээр шууд дуудлага авна. Дугаар бүр өөрийн SIP порт
+  // (5060, 5062, ...) ба дууны портын хүрээтэй (10000-аас 40 порт тутам); firewall-д нээлттэй байх ёстой.
+  const sipPort = Number(process.env.SIP_PORT ?? 5060);
+  const rtpStart = Number(process.env.SIP_RTP_PORT_START ?? 10000);
+  let lines: Line[] = [];
+  try {
+    lines = lineStore.all();
+  } catch (error) {
+    console.error("[sip] дугааруудыг уншиж чадсангүй:", error instanceof Error ? error.message : error);
+  }
+  lines.forEach((line, index) => {
     startSipLine({
-      server: SIP_SERVER, user: SIP_USER, password: SIP_PASSWORD,
-      port: Number(process.env.SIP_PORT ?? 5060), publicIp: process.env.SIP_PUBLIC_IP || undefined,
-      rtpPortStart: Number(process.env.SIP_RTP_PORT_START ?? 10000),
-    }).catch((error) => console.error("[sip] эхлүүлж чадсангүй:", error instanceof Error ? error.message : error));
-  }
+      server: line.server, user: line.number, password: line.password, businessId: line.businessId,
+      port: sipPort + index * 2, publicIp: process.env.SIP_PUBLIC_IP || undefined, rtpPortStart: rtpStart + index * 40,
+    }).then((started) => {
+      if (!sipLines.has(line.businessId)) sipLines.set(line.businessId, started);
+    }).catch((error) => console.error(`[sip] …${line.number.slice(-2)} дугаарыг эхлүүлж чадсангүй:`, error instanceof Error ? error.message : error));
+  });
 });

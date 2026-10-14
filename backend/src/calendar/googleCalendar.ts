@@ -9,6 +9,17 @@ export type AvailabilityRequest = {
 };
 export type AvailableSlot = { startTime: string; endTime: string };
 
+// Ширээний тоо: нэг цагт хэдэн захиалга зэрэг авах. 1 бол календарийн аливаа эвент тэр цагийг бүхэлд нь хаана
+// (анхны горим). 1-ээс их бол захиалга бүр хүний тоогоороо ширээ эзэлж, нийт ширээ дүүртэл захиалга авна.
+const tableCount = () => Math.max(1, Math.floor(Number(process.env.TABLE_COUNT) || 1));
+const seatsPerTable = () => Math.max(1, Math.floor(Number(process.env.SEATS_PER_TABLE) || 4));
+export const tablesFor = (partySize?: number) => Math.max(1, Math.ceil((partySize ?? 1) / seatsPerTable()));
+
+function partySizeOf(value: unknown): number | undefined {
+  const size = Number(value);
+  return Number.isInteger(size) && size >= 1 && size <= 100 ? size : undefined;
+}
+
 const clock = new Intl.DateTimeFormat("en-CA", {
   timeZone: CALENDAR_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit",
   hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "longOffset",
@@ -86,7 +97,36 @@ function calendarClient(access: "freebusy" | "readonly" | "write" = "freebusy"):
   return { auth, calendarId };
 }
 
-export async function checkAvailability(input: AvailabilityRequest): Promise<{
+// Энэ хугацаанд давхцах эвентүүд, тус бүр хэдэн ширээ эзэлж буйгаар (ширээгээр тооцох горимд).
+async function tableLoad(start: number, end: number): Promise<{ from: number; to: number; weight: number }[]> {
+  const { auth, calendarId } = calendarClient("readonly");
+  let items: unknown;
+  try {
+    items = record((await auth.request<unknown>({
+      url: `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+      method: "GET", timeout: 10000, retry: false,
+      params: { singleEvents: true, maxResults: 250, timeMin: new Date(start).toISOString(), timeMax: new Date(end).toISOString() },
+    })).data).items;
+  } catch {
+    throw new Error("Google Calendar availability request failed");
+  }
+  if (!Array.isArray(items)) throw new TypeError("Google Calendar response is missing events");
+  return items.flatMap((value) => {
+    const event = record(value);
+    if (event.status === "cancelled" || event.transparency === "transparent") return [];
+    try {
+      const from = providerTime(record(event.start).dateTime);
+      const to = providerTime(record(event.end).dateTime);
+      const metadata = (record(event.extendedProperties ?? {}).private ?? {}) as Record<string, unknown>;
+      // Хүний тоогүй (гараар нэмсэн, хуучин) эвент нэг ширээ эзэлнэ.
+      return to > from ? [{ from, to, weight: tablesFor(partySizeOf(metadata.partySize)) }] : [];
+    } catch {
+      return []; // Бүтэн өдрийн эвент (dateTime-гүй) ширээ эзлэхгүй.
+    }
+  });
+}
+
+export async function checkAvailability(input: AvailabilityRequest & { partySize?: number }): Promise<{
   timeZone: typeof CALENDAR_TIME_ZONE;
   slots: AvailableSlot[];
 }> {
@@ -97,6 +137,27 @@ export async function checkAvailability(input: AvailabilityRequest): Promise<{
   const end = localTime(request.date, range.end);
   const duration = serviceDuration(request.durationMinutes);
   if (end <= start) throw new RangeError("Calendar time range must end after it starts on the same date");
+  const capacity = tableCount();
+  const need = capacity > 1 ? tablesFor(partySizeOf(request.partySize)) : 1;
+  const busy = capacity > 1 ? await tableLoad(start, end) : await freeBusy(start, end);
+  if (need > capacity) return { timeZone: CALENDAR_TIME_ZONE, slots: [] };
+
+  const slots: AvailableSlot[] = [];
+  const length = duration * 60000;
+  const now = Date.now();
+  // ponytail: one-day, duration-sized grid from the requested start; add a
+  // separate slot step only when a business needs different appointment cadence.
+  for (let time = start; time + length <= end; time += length) {
+    const load = busy.filter(({ from, to }) => time < to && time + length > from).reduce((sum, { weight }) => sum + weight, 0);
+    if (time >= now && load + need <= capacity) {
+      slots.push({ startTime: new Date(time).toISOString(), endTime: new Date(time + length).toISOString() });
+    }
+  }
+  return { timeZone: CALENDAR_TIME_ZONE, slots };
+}
+
+// Анхны горим: календарь дахь аливаа завгүй хугацаа тэр цагийг бүхэлд нь хаана.
+async function freeBusy(start: number, end: number): Promise<{ from: number; to: number; weight: number }[]> {
   const { auth, calendarId } = calendarClient();
   let data: unknown;
   try {
@@ -128,20 +189,9 @@ export async function checkAvailability(input: AvailabilityRequest): Promise<{
     const from = providerTime(interval.start);
     const to = providerTime(interval.end);
     if (to <= from) throw new TypeError("Invalid busy interval in Google Calendar response");
-    return { from, to };
+    return { from, to, weight: Infinity };
   });
-
-  const slots: AvailableSlot[] = [];
-  const length = duration * 60000;
-  const now = Date.now();
-  // ponytail: one-day, duration-sized grid from the requested start; add a
-  // separate slot step only when a business needs different appointment cadence.
-  for (let time = start; time + length <= end; time += length) {
-    if (time >= now && !busy.some(({ from, to }) => time < to && time + length > from)) {
-      slots.push({ startTime: new Date(time).toISOString(), endTime: new Date(time + length).toISOString() });
-    }
-  }
-  return { timeZone: CALENDAR_TIME_ZONE, slots };
+  return busy;
 }
 
 export type AppointmentRequest = {
@@ -152,6 +202,8 @@ export type AppointmentRequest = {
   serviceName: string;
   startTime: string;
   durationMinutes: number;
+  // Хүний тоо: ширээгээр тооцох горимд хэдэн ширээ эзлэхийг тодорхойлно.
+  partySize?: number;
 };
 export type Booking = Omit<AppointmentRequest, "requestId"> & {
   id: string;
@@ -195,8 +247,11 @@ export async function createAppointment(input: AppointmentRequest): Promise<Book
     throw new RangeError("Invalid appointment time range");
   }
   const id = createHash("sha256").update(requestId).digest("hex");
+  // Календарьт хүний тоо текстээр, захиалгын объектод тоогоор хадгалагдана.
+  const party = partySizeOf(request.partySize);
+  const stored: Record<string, string> = { ...properties, ...(party ? { partySize: String(party) } : {}) };
   const booking: Booking = {
-    ...properties, id, calendarEventId: id, startTime: new Date(start).toISOString(),
+    ...properties, ...(party ? { partySize: party } : {}), id, calendarEventId: id, startTime: new Date(start).toISOString(),
     endTime: new Date(end).toISOString(), durationMinutes, status: "confirmed",
   };
   const { auth, calendarId } = calendarClient("write");
@@ -206,7 +261,7 @@ export async function createAppointment(input: AppointmentRequest): Promise<Book
     const metadata = record(record(event.extendedProperties).private);
     if (event.id !== id || event.status !== "confirmed" || event.transparency === "transparent" ||
         providerTime(record(event.start).dateTime) !== start || providerTime(record(event.end).dateTime) !== end ||
-        Object.entries(properties).some(([key, value]) => metadata[key] !== value)) {
+        Object.entries(stored).some(([key, value]) => metadata[key] !== value)) {
       throw new Error("Calendar event does not match the confirmed booking request; verify it manually");
     }
     return booking;
@@ -224,7 +279,7 @@ export async function createAppointment(input: AppointmentRequest): Promise<Book
   const result = bookingQueue.then(async () => {
     const previous = await existing();
     if (previous !== undefined) return verify(previous.data);
-    const available = await checkAvailability({ date, timeRange, durationMinutes });
+    const available = await checkAvailability({ date, timeRange, durationMinutes, partySize: partySizeOf(request.partySize) });
     if (!available.slots.some((slot) => slot.startTime === booking.startTime && slot.endTime === booking.endTime) ||
         start <= Date.now()) throw new Error("Appointment time is unavailable or in the past");
     let event: unknown;
@@ -236,7 +291,7 @@ export async function createAppointment(input: AppointmentRequest): Promise<Book
           start: { dateTime: booking.startTime, timeZone: CALENDAR_TIME_ZONE },
           end: { dateTime: booking.endTime, timeZone: CALENDAR_TIME_ZONE },
           status: "confirmed", transparency: "opaque", visibility: "private",
-          extendedProperties: { private: properties },
+          extendedProperties: { private: stored },
         },
       })).data;
     } catch {
@@ -272,10 +327,46 @@ function toBooking(value: unknown): Booking | null {
       serviceId: bookingText(metadata.serviceId, "serviceId"), serviceName: bookingText(metadata.serviceName, "serviceName"),
       startTime: new Date(start).toISOString(), endTime: new Date(end).toISOString(),
       durationMinutes: Math.round((end - start) / 60000), status: "confirmed", source: "AI_PHONE_AGENT",
+      ...(partySizeOf(metadata.partySize) ? { partySize: partySizeOf(metadata.partySize) } : {}),
     };
   } catch {
     return null; // Гараар зассан, бүтэц нь эвдэрсэн эвент жагсаалтыг бүхэлд нь унагаахгүй.
   }
+}
+
+const lastDigits = (phone: string) => phone.replace(/\D/g, "").slice(-8);
+
+// Залгаж буй дугаарт бүртгэлтэй ирээдүйн захиалгыг цуцална. Дугаарыг AI биш, дуудлагын мэдээлэл өгнө.
+// Энэ дугаарын ирээдүйн захиалгууд (цуцлах үед аль нь болохыг тодруулахад).
+export async function upcomingBookingsFor(phone: string): Promise<Booking[]> {
+  const digits = lastDigits(phone);
+  return (await listBookings()).filter((item) => lastDigits(item.phone) === digits && Date.parse(item.startTime) > Date.now());
+}
+
+export async function cancelAppointment(input: { phone: string; startTime: string }): Promise<{ id: string; startTime: string; status: "cancelled" }> {
+  const start = providerTime(input.startTime);
+  const phone = lastDigits(input.phone);
+  if (phone.length < 8) throw new TypeError("Caller phone is unknown");
+  bookingList = undefined;
+  const own = (await listBookings()).filter((item) => lastDigits(item.phone) === phone && Date.parse(item.startTime) > Date.now());
+  // Цаг нь яг таарахгүй ч ("маргааш орой") тэр өдөр ганц захиалгатай бол түүнийг авна.
+  const day = (time: number) => { const p = localParts(time); return `${p.year}-${p.month}-${p.day}`; };
+  const sameDay = own.filter((item) => day(Date.parse(item.startTime)) === day(start));
+  const booking = own.find((item) => Date.parse(item.startTime) === start) ?? (sameDay.length === 1 ? sameDay[0] : undefined);
+  if (!booking) throw new Error("No booking for this caller at that time");
+  const { auth, calendarId } = calendarClient("write");
+  try {
+    await auth.request({
+      url: `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(booking.calendarEventId)}`,
+      method: "DELETE", timeout: 10000, retry: false, params: { sendUpdates: "none" },
+    });
+  } catch (error) {
+    // Аль хэдийн устсан бол цуцлагдсан гэж үзнэ.
+    const status = (error as { response?: { status?: number } } | null)?.response?.status;
+    if (status !== 404 && status !== 410) throw new Error("Google Calendar cancellation failed");
+  }
+  bookingList = undefined;
+  return { id: booking.id, startTime: booking.startTime, status: "cancelled" };
 }
 
 // AI-ийн үүсгэсэн захиалгууд (сүүлийн 30 хоног ба ирээдүй), эхлэх цагаар өсөх дарааллаар.
