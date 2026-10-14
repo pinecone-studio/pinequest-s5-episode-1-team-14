@@ -6,7 +6,7 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin", "cyrillic", "cyrillic-ext"], variable: "--font-sans", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "AI Front-Desk Mongolia",
+  title: "CallAI",
   description: "Дуудлага, захиалга, бизнесийн мэдээллээ нэг дороос удирдаарай.",
 };
 
