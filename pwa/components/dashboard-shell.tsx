@@ -58,7 +58,6 @@ export default function DashboardShell({ children, account }: { children: React.
         </div>)}
       </nav>
       <div className="sidebar-footer">
-        <a href="https://github.com/pinecone-studio/pinequest-s5-episode-1-team-14#local-setup" target="_blank" rel="noreferrer">Ашиглах заавар <Icon name="external" size={12} /><span className="sr-only"> (шинэ цонхонд нээгдэнэ)</span></a>
         {account && <div className="account"><b>{account.business}</b>{account.numbers.map((number) => <span key={number} className="num">☎ {number}</span>)}<span>{account.email}</span></div>}
         <form method="post" action="/api/logout"><button className="btn btn-ghost btn-sm login-logout" type="submit">Гарах</button></form>
         <span>© 2026 CallAI</span>

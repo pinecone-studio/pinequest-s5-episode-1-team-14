@@ -48,7 +48,9 @@ const SOURCES: Record<DataSource, { tone: string; label: string }> = {
   offline: { tone: "badge-gray", label: "Холбогдоогүй" },
 };
 
+// Хэвийн (бодит өгөгдөлтэй) үед тэмдэг харуулахгүй: зөвхөн жишээ эсвэл холбогдоогүй үед анхааруулна.
 export function SourceBadge({ source }: { source: DataSource }) {
+  if (source === "live") return null;
   return <span className={`badge ${SOURCES[source].tone}`}>{SOURCES[source].label}</span>;
 }
 
