@@ -7,13 +7,19 @@
 import type { WebSocket, RawData } from "ws";
 import { createGeminiLiveSession } from "../ai/geminiLive.js";
 import { createGeminiTurnSession } from "../ai/geminiTurns.js";
-import { CALL_GREETING } from "../ai/callPrompt.js";
+import { AccountStore, DEFAULT_BUSINESS_ID, voiceIdFor } from "../accounts/store.js";
+import { ACK_PHRASES, CALL_GREETING } from "../ai/callPrompt.js";
+import { speakPhoneNumbers } from "../voice/spokenNumbers.js";
+import { createTimeStretcher } from "../voice/timeStretch.js";
+
 import { cachedUlaw8k, streamUlaw8k } from "../voice/elevenlabs.js";
 import { CallSessionStore } from "../calls/store.js";
 import { inferIntent } from "../calls/intent.js";
 import { createTranscriptRecorder, TranscriptStore } from "../calls/transcript.js";
-import { takeSentences } from "./sentences.js";
 import { consumeStreamToken } from "./streamTokens.js";
+
+// AI-ийн ярианы хурд (1 = ElevenLabs-ийн анхдагч). Утсанд 1.15 хурдан ч ойлгомжтой.
+const SPEECH_SPEED = Math.min(1.3, Math.max(0.8, Number(process.env.SPEECH_SPEED) || 1.15));
 
 const MULAW_BIAS = 0x84;
 const MULAW_CLIP = 32635;
@@ -182,12 +188,19 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
   // хурдаар тоглуулдаг тул 20мс-ийн таймер хэрэггүй.
   async function speak(text: string, generation: number, fixed: boolean): Promise<void> {
     if (closed || generation !== speechGeneration || !text.trim()) return;
-    const audio = fixed ? [await cachedUlaw8k(text)] : await streamUlaw8k(text);
+    const audio = fixed ? [await cachedUlaw8k(text, callVoiceId)] : await streamUlaw8k(speakPhoneNumbers(text), callVoiceId);
     streaming = true;
+    // eleven_v4_turbo speed тохиргоог үл тоодог тул дууг өндрийг нь хадгалан энд хурдасгана.
+    const stretcher = SPEECH_SPEED === 1 ? null : createTimeStretcher(SPEECH_SPEED);
     try {
       for await (const chunk of audio) {
         if (closed || generation !== speechGeneration) return;
-        sendAudio(chunk);
+        const out = stretcher ? encodeMuLaw(stretcher.push(decodeMuLaw(Buffer.from(chunk)))) : chunk;
+        if (out.length) sendAudio(out);
+      }
+      if (stretcher && !closed && generation === speechGeneration) {
+        const rest = encodeMuLaw(stretcher.flush());
+        if (rest.length) sendAudio(rest);
       }
       marksPending++;
       ws.send(JSON.stringify({ event: "mark", streamSid, mark: { name: String(generation) } }));
@@ -205,6 +218,8 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
   // Дуудагч AI-г таслан орж ярихад: тоглуулж буй/дараалалд буй үгсийг хаяж,
   // Twilio-д хараахан тоглоогүй аудиог нь цэвэрлэ (clear event — энэ бол
   // Twilio-ийн barge-in-д зориулсан албан ёсны механизм).
+  let liveMode = false;
+
   function onInterrupted(): void {
     speechGeneration++;
     pendingText = "";
@@ -216,15 +231,44 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
     if (!closed) sendAudio(encodeMuLaw(downsample(pcm24k)));
   }
 
+  let ackIndex = 0;
+  let callVoiceId: string | undefined;
+
+  // Хариултыг бүтнээр нь нэг дор уншуулна: өгүүлбэр бүрийг тусад нь уншвал аялга тасарч,
+  // нэг хэвийн сонсогддог. Эхний дуу ~0.25с хоцорно (Gemini хариултаа дуусгах хугацаа).
   function onText(delta: string): void {
-    const { sentences, rest } = takeSentences(pendingText + delta);
-    sentences.forEach((sentence) => enqueueSpeak(sentence));
-    pendingText = rest;
+    pendingText += delta;
+  }
+
+  function onHold(text: string): void {
+    if (pendingText.trim()) enqueueSpeak(pendingText);
+    pendingText = "";
+    enqueueSpeak(text, true);
+  }
+
+  function onAck(): void {
+    enqueueSpeak(ACK_PHRASES[ackIndex++ % ACK_PHRASES.length], true);
   }
 
   function onToolResult(name: string, result: unknown): void {
     if (name === "check_availability") checkedAvailability = true;
+    if (name === "request_human") {
+      try {
+        store.update(callId, { intent: "REQUEST_HUMAN" });
+      } catch (error) {
+        console.error("[twilio] ажилтны хүсэлтийг бүртгэж чадсангүй:", error);
+      }
+      return;
+    }
     const booking = result as { id?: unknown; status?: unknown } | null;
+    if (name === "cancel_appointment" && booking?.status === "cancelled") {
+      try {
+        store.update(callId, { intent: "CANCEL_BOOKING" });
+      } catch (error) {
+        console.error("[twilio] цуцлалтыг дуудлагатай холбож чадсангүй:", error);
+      }
+      return;
+    }
     if (name !== "create_appointment" || typeof booking?.id !== "string" || booking.status !== "confirmed") return;
     try {
       store.update(callId, { bookingId: booking.id, intent: "BOOK_APPOINTMENT" });
@@ -274,14 +318,26 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
         streamSid = message.start.streamSid;
         callId = message.start.callSid;
         const callerPhone = normalizePhone(message.start.customParameters?.callerPhone);
-        store.start({ id: callId, callerPhone, startedAt: new Date().toISOString() });
+        // Аль бизнесийн дугаарт ирсэн (SIP шугам дамжуулна); Twilio-ийн дуудлага үндсэн бизнесийнх.
+        const businessId = message.start.customParameters?.businessId || DEFAULT_BUSINESS_ID;
+        const business = new AccountStore().businesses().find((item) => item.id === businessId);
+        const businessName = businessId === DEFAULT_BUSINESS_ID ? undefined : business?.name;
+        // Бизнесийн сонгосон дуу (тохиргоо); сонгоогүй бол анхдагч дуу.
+        callVoiceId = voiceIdFor(business?.voice);
+        store.start({ id: callId, callerPhone, startedAt: new Date().toISOString(), ...(businessId === DEFAULT_BUSINESS_ID ? {} : { businessId }) });
         // Gemini холбогдох хооронд дуудагч чимээгүй хүлээхгүйн тулд эхэлж мэндэлнэ.
+        // Сануулах дуудлагад мэндчилгээ, заавар нь захиалга бүрээр өөр (кэшлэхгүй).
+        const params = message.start.customParameters ?? {};
+        const reminder = params.direction === "reminder" && params.greeting ? params : null;
+        // Өөр бизнесийн дугаарт нэрээ хэлж мэндэлнэ.
+        const greeting = reminder?.greeting ?? (businessName ? `Сайн байна уу? ${businessName}-ийн AI туслах байна. Танд юугаар туслах вэ?` : CALL_GREETING);
         if (!nativeVoice) {
-          enqueueSpeak(CALL_GREETING, true);
-          transcript.say("agent", CALL_GREETING);
+          enqueueSpeak(greeting, !reminder);
+          transcript.say("agent", greeting);
         }
         // Анхдагч нь ээлжилсэн горим (монгол яриаг илүү таньдаг). Gemini-ийн өөрийн дуу эсвэл AI_MODE=live бол Live.
-        const createSession = nativeVoice || process.env.AI_MODE === "live" ? createGeminiLiveSession : createGeminiTurnSession;
+        liveMode = nativeVoice || process.env.AI_MODE === "live";
+        const createSession = liveMode ? createGeminiLiveSession : createGeminiTurnSession;
         geminiSession = await createSession({
           ...(nativeVoice ? { onAudio: onGeminiAudio } : {}),
           onText: (delta) => {
@@ -295,10 +351,12 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
             if (!nativeVoice) onTurnComplete();
           },
           onInterrupted,
+          onAck,
+          onHold,
           onToolResult,
           onError: (msg) => console.error("[twilio] Gemini алдаа:", msg),
           onClose: endCall,
-        }, { callerPhone, greeted: !nativeVoice });
+        }, { callerPhone, greeted: !nativeVoice, greeting, extra: reminder?.instruction, businessId, businessName });
         // Gemini-ийн дуугаар мэндлүүлэхийн тулд эхний эргэлтийг өдөөнө.
         if (nativeVoice) geminiSession.sendRealtimeInput({ text: "(Дуудлага холбогдлоо.)" });
         return;
@@ -310,7 +368,8 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
         const pcm8k = decodeMuLaw(ulaw);
         const loudness = rootMeanSquare(pcm8k);
         // Gemini-ийн дуугаар ярих горимд таслалтыг Gemini-ийн VAD дангаараа шийднэ.
-        if ((streaming || marksPending > 0) && loudness > BARGE_IN_RMS_THRESHOLD) onInterrupted();
+        // Ээлжилсэн горимд таслалтыг яриа танигдсаны дараа session өөрөө хийнэ.
+        if (liveMode && (streaming || marksPending > 0) && loudness > BARGE_IN_RMS_THRESHOLD) onInterrupted();
         if (loudness > CALLER_VOICE_RMS) {
           callerSpokeAt = Date.now();
           awaitingReply = true;

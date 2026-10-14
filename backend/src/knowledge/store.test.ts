@@ -94,3 +94,12 @@ test("invalid input, corrupt data, and failed writes preserve existing records",
   assert.equal(readFileSync(file, "utf8"), original);
   assert.deepEqual(readdirSync(directory), ["knowledge.json"]);
 });
+
+test("knowledge items keep the owning business", (context) => {
+  const dir = mkdtempSync(join(tmpdir(), "knowledge-business-"));
+  context.after(() => rmSync(dir, { recursive: true, force: true }));
+  const store = new BusinessKnowledgeStore(join(dir, "knowledge.json"));
+  const item = store.save({ category: "faq", title: "Зогсоол", content: "Үнэгүй зогсоолтой.", active: true, businessId: "cafe" });
+  assert.equal(store.get(item.id)?.businessId, "cafe");
+  assert.throws(() => store.save({ category: "faq", title: "x", content: "y", businessId: " " }), /businessId/);
+});

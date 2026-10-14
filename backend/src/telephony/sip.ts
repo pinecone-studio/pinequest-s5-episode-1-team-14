@@ -76,6 +76,14 @@ export function parseSdpAudio(sdp: string): { ip: string; port: number; payloadT
   return { ip, port: Number(media[1]), payloadTypes: media[2].trim().split(/\s+/).map(Number) };
 }
 
+// Дараалал: давхардсан, бага зэрэг хоцорсон (хаяна), дараагийнх, эсвэл урсгал шинээр эхэлсэн (хүлээн авна).
+export function rtpOrder(last: number, sequence: number): "next" | "duplicate" | "late" | "restart" {
+  const ahead = (sequence - last + 0x10000) % 0x10000;
+  if (ahead === 0) return "duplicate";
+  if (ahead >= 0x10000 - 100) return "late";
+  return ahead > 3000 ? "restart" : "next";
+}
+
 export function buildRtpPacket(sequence: number, timestamp: number, ssrc: number, payload: Uint8Array, marker = false, payloadType = 0): Buffer {
   const packet = Buffer.alloc(12 + payload.length);
   packet[0] = 0x80;
@@ -204,11 +212,22 @@ async function stunMappedAddress(socket: Socket, host: string): Promise<{ addres
   }
 }
 
-export type SipConfig = { server: string; user: string; password: string; port?: number; publicIp?: string; rtpPortStart?: number };
+export type SipConfig = {
+  server: string; user: string; password: string; port?: number; publicIp?: string; rtpPortStart?: number;
+  // Энэ дугаар аль бизнесийнх (дуудлага, мэдлэгийн сан, AI-ийн танилцуулга үүгээр сонгогдоно).
+  businessId?: string;
+};
 
 type Call = {
   invite: SipMessage;
+  // Манай талын From/To толгой (tag-тай), эсрэг талынх, BYE илгээх хаяг ба замууд.
   toHeader: string;
+  peerHeader: string;
+  target: string;
+  routes: string[];
+  byeCseq: number;
+  codec: number;
+  ackText?: string;
   rtp: Socket;
   rtpPort: number;
   remote: { address: string; port: number };
@@ -226,7 +245,10 @@ type Call = {
   lastSequence: number;
 };
 
-export async function startSipLine(config: SipConfig): Promise<void> {
+export type SipLine = { dial: (number: string, params?: Record<string, string>) => Promise<boolean> };
+const RING_TIMEOUT_MS = 45_000;
+
+export async function startSipLine(config: SipConfig): Promise<SipLine> {
   const serverIp = (await lookup(config.server, 4)).address;
   const server = { address: serverIp, port: 5060 };
   const signal = createSocket("udp4");
@@ -251,6 +273,8 @@ export async function startSipLine(config: SipConfig): Promise<void> {
   const answering = new Set<string>();
   const rtpPorts = new Set<number>();
   const rtpPortStart = config.rtpPortStart ?? 10_000;
+  // Гадагш залгаж буй (хариу хүлээж буй) дуудлагууд: Call-ID → хариуг боловсруулах функц.
+  const dialing = new Map<string, (response: SipMessage) => void>();
 
   const send = (text: string, to = server) => signal.send(text, to.port, to.address);
   const via = () => `Via: SIP/2.0/UDP ${publicIp}:${publicPort};branch=z9hG4bK${token()};rport`;
@@ -304,10 +328,8 @@ export async function startSipLine(config: SipConfig): Promise<void> {
     call.rtp.close();
     rtpPorts.delete(call.rtpPort);
     if (sendBye) {
-      // Дуудлагын дотор манай тал нь To; Request-URI нь эсрэг талын Contact.
-      const target = header(call.invite, "contact").match(/<([^>]+)>/)?.[1] ?? `sip:${config.server}`;
-      const lines = [`BYE ${target} SIP/2.0`, via(), "Max-Forwards: 70", ...headersNamed(call.invite, "record-route").map((route) => `Route: ${route}`),
-        `From: ${call.toHeader}`, `To: ${header(call.invite, "from")}`, `Call-ID: ${callId}`, "CSeq: 1 BYE"];
+      const lines = [`BYE ${call.target} SIP/2.0`, via(), "Max-Forwards: 70", ...call.routes.map((route) => `Route: ${route}`),
+        `From: ${call.toHeader}`, `To: ${call.peerHeader}`, `Call-ID: ${callId}`, `CSeq: ${call.byeCseq} BYE`];
       send(`${lines.join("\r\n")}\r\nContent-Length: 0\r\n\r\n`);
     }
     call.socket.emit("message", JSON.stringify({ event: "stop" }));
@@ -318,52 +340,37 @@ export async function startSipLine(config: SipConfig): Promise<void> {
     console.log(`[sip] дуудлага дууслаа (${[...calls.values()].filter((item) => !item.ended).length} идэвхтэй үлдлээ)`);
   }
 
-  async function onInvite(message: SipMessage, from: RemoteInfo): Promise<void> {
-    const callId = header(message, "call-id");
-    const existing = calls.get(callId);
-    if (existing) {
-      if (existing.ended) return;
-      // Давтан INVITE бол өмнөх хариугаа, re-INVITE (шинэ CSeq) бол ижил SDP-тэй шинэ хариу илгээнэ.
-      if (header(message, "cseq") === header(existing.invite, "cseq")) send(existing.okResponse, from);
-      else respond(message, "200 OK", from, [contact()], existing.sdp, existing.toHeader);
-      return;
-    }
-    if (answering.has(callId)) return;
-    const offer = parseSdpAudio(message.body);
-    const codec = offer?.payloadTypes.includes(0) ? 0 : offer?.payloadTypes.includes(8) ? 8 : -1;
-    if (!offer || codec < 0) {
-      console.error(`[sip] дуудлагыг авч чадсангүй: ${offer ? `дэмжих codec алга (санал болгосон: ${offer.payloadTypes.join(" ")})` : `SDP алга (${message.body.length} байт)`}`);
-      respond(message, "488 Not Acceptable Here", from);
-      return;
-    }
-    const active = [...calls.values()].filter((call) => !call.ended).length;
-    if (active >= MAX_CALLS) {
-      console.error(`[sip] дуудлагыг авсангүй: ${active} дуудлага идэвхтэй байна`);
-      respond(message, "486 Busy Here", from);
-      return;
-    }
-    respond(message, "100 Trying", from);
-    answering.add(callId);
-    let releasePort = () => {};
-    try {
+  const activeCalls = () => [...calls.values()].filter((call) => !call.ended).length + dialing.size;
 
+  // Дууны порт нөөцөлж нээгээд SDP-д зарлах гадаад хаяг, портыг буцаана.
+  async function openRtp(): Promise<{ rtp: Socket; rtpPort: number; mediaIp: string; mediaPort: number }> {
     const rtp = createSocket("udp4");
     // Зэрэг ирсэн дуудлагууд нэг порт авахгүйн тулд хүлээхээс өмнө нөөцөлнө.
     let rtpPort = rtpPortStart;
     while (rtpPorts.has(rtpPort)) rtpPort += 2;
     rtpPorts.add(rtpPort);
-    releasePort = () => rtpPorts.delete(rtpPort);
-    await new Promise<void>((resolve, reject) => rtp.once("error", reject).bind(rtpPort, resolve));
+    try {
+      await new Promise<void>((resolve, reject) => rtp.once("error", reject).bind(rtpPort, resolve));
+      // NAT-ийн цаана дотоод порт өөр харагддаг тул гадаад хаягийг STUN-аар асууна.
+      const mapped = config.publicIp ? null : await stunMappedAddress(rtp, STUN_HOST);
+      return { rtp, rtpPort, mediaIp: mapped?.address ?? publicIp, mediaPort: mapped?.port ?? rtpPort };
+    } catch (error) {
+      rtpPorts.delete(rtpPort);
+      rtp.close();
+      throw error;
+    }
+  }
 
-    // Дууны сокетын гадаад хаягийг SDP-д зарлана: NAT-ийн цаана дотоод порт өөр харагддаг.
-    const mappedRtp = config.publicIp ? null : await stunMappedAddress(rtp, STUN_HOST);
-    const mediaIp = mappedRtp?.address ?? publicIp;
-    const mediaPort = mappedRtp?.port ?? rtpPort;
-    const toHeader = `${header(message, "to")};tag=${token(4)}`;
+  function buildSdp(ip: string, port: number, codecs: number[]): string {
     const sessionId = Date.now();
-    const sdp = ["v=0", `o=- ${sessionId} ${sessionId} IN IP4 ${mediaIp}`, "s=ai-frontdesk", `c=IN IP4 ${mediaIp}`, "t=0 0",
-      `m=audio ${mediaPort} RTP/AVP ${codec}`, `a=rtpmap:${codec} ${codec === 8 ? "PCMA" : "PCMU"}/8000`, "a=ptime:20", "a=sendrecv", ""].join("\r\n");
+    return ["v=0", `o=- ${sessionId} ${sessionId} IN IP4 ${ip}`, "s=ai-frontdesk", `c=IN IP4 ${ip}`, "t=0 0",
+      `m=audio ${port} RTP/AVP ${codecs.join(" ")}`, ...codecs.map((codec) => `a=rtpmap:${codec} ${codec === 8 ? "PCMA" : "PCMU"}/8000`),
+      "a=ptime:20", "a=sendrecv", ""].join("\r\n");
+  }
 
+  // Дуудлагын дуу (RTP)-г AI-ийн урсгалтай холбох Twilio хэлбэрийн socket үүсгэж, 20мс тутмын илгээлтийг эхлүүлнэ.
+  function createCall(callId: string, fields: Pick<Call, "invite" | "toHeader" | "peerHeader" | "target" | "routes" | "byeCseq" | "codec" | "rtp" | "rtpPort" | "remote" | "sdp">): Call {
+    const { codec, rtp } = fields;
     const audio = new PacedAudio();
     const socket = Object.assign(new EventEmitter(), {
       send(data: string) {
@@ -379,11 +386,10 @@ export async function startSipLine(config: SipConfig): Promise<void> {
     const emitMark = (name: string) => socket.emit("message", JSON.stringify({ event: "mark", mark: { name } }));
 
     const call: Call = {
-      invite: message, toHeader, rtp, rtpPort, remote: { address: offer.ip, port: offer.port }, socket, audio,
-      ended: false, acked: false, timers: [], lastMediaAt: Date.now(), okResponse: "", sdp, stats: { sent: 0, received: 0, ignored: 0, lost: 0, late: 0, peak: 0 }, lastSequence: -1,
+      ...fields, socket, audio, ended: false, acked: false, timers: [], lastMediaAt: Date.now(), okResponse: "",
+      stats: { sent: 0, received: 0, ignored: 0, lost: 0, late: 0, peak: 0 }, lastSequence: -1,
     };
     calls.set(callId, call);
-    answering.delete(callId);
 
     // Оношлогоо: SIP_RECORD_DIR заасан үед л залгагчийн түүхий дууг (mu-law 8kHz) файлд хадгална.
     const recordDir = process.env.SIP_RECORD_DIR;
@@ -405,12 +411,12 @@ export async function startSipLine(config: SipConfig): Promise<void> {
       call.stats.received++;
       // Хоцорч, давхардаж ирсэн хэсгийг хаяна: дарааллаас гадуур тоглуулбал яриа гажна.
       if (call.lastSequence >= 0) {
-        const ahead = (parsed.sequence - call.lastSequence + 0x10000) % 0x10000;
-        if (ahead === 0 || ahead > 0x8000) {
+        const order = rtpOrder(call.lastSequence, parsed.sequence);
+        if (order === "duplicate" || order === "late") {
           call.stats.late++;
           return;
         }
-        call.stats.lost += ahead - 1;
+        if (order === "next") call.stats.lost += (parsed.sequence - call.lastSequence + 0x10000) % 0x10000 - 1;
       }
       call.lastSequence = parsed.sequence;
       for (const sample of decodeMuLaw(parsed.payload)) call.stats.peak = Math.max(call.stats.peak, Math.abs(sample));
@@ -443,6 +449,57 @@ export async function startSipLine(config: SipConfig): Promise<void> {
       nextAt += FRAME_MS;
       call.tickTimer = setTimeout(tick, Math.max(0, nextAt - Date.now()));
     };
+    call.tickTimer = setTimeout(tick, 0);
+    return call;
+  }
+
+  // Дуудлага бүрэн холбогдсоны дараа AI-тай ярилцлагыг эхлүүлнэ.
+  function startConversation(callId: string, call: Call, callerPhone: string, params: Record<string, string> = {}): void {
+    if (call.ended) return;
+    handleTwilioMediaStream(call.socket as unknown as WebSocket);
+    call.socket.emit("message", JSON.stringify({
+      event: "start",
+      start: { streamSid: callId, callSid: `SIP${token(12)}`, // Туршилтын дуудлагад өөр бизнесийн AI ярьж болно (params.businessId).
+      customParameters: { ...params, businessId: params.businessId ?? config.businessId ?? "default", streamToken: issueStreamToken(), callerPhone } },
+    }));
+  }
+
+  async function onInvite(message: SipMessage, from: RemoteInfo): Promise<void> {
+    const callId = header(message, "call-id");
+    const existing = calls.get(callId);
+    if (existing) {
+      if (existing.ended) return;
+      // Давтан INVITE бол өмнөх хариугаа, re-INVITE (шинэ CSeq) бол ижил SDP-тэй шинэ хариу илгээнэ.
+      if (existing.okResponse && header(message, "cseq") === header(existing.invite, "cseq")) send(existing.okResponse, from);
+      else respond(message, "200 OK", from, [contact()], existing.sdp, existing.toHeader);
+      return;
+    }
+    if (answering.has(callId)) return;
+    const offer = parseSdpAudio(message.body);
+    const codec = offer?.payloadTypes.includes(0) ? 0 : offer?.payloadTypes.includes(8) ? 8 : -1;
+    if (!offer || codec < 0) {
+      console.error(`[sip] дуудлагыг авч чадсангүй: ${offer ? `дэмжих codec алга (санал болгосон: ${offer.payloadTypes.join(" ")})` : `SDP алга (${message.body.length} байт)`}`);
+      respond(message, "488 Not Acceptable Here", from);
+      return;
+    }
+    const active = activeCalls();
+    if (active >= MAX_CALLS) {
+      console.error(`[sip] дуудлагыг авсангүй: ${active} дуудлага идэвхтэй байна`);
+      respond(message, "486 Busy Here", from);
+      return;
+    }
+    respond(message, "100 Trying", from);
+    answering.add(callId);
+    const { rtp, rtpPort, mediaIp, mediaPort } = await openRtp();
+    const toHeader = `${header(message, "to")};tag=${token(4)}`;
+    const sdp = buildSdp(mediaIp, mediaPort, [codec]);
+    const call = createCall(callId, {
+      invite: message, toHeader, peerHeader: header(message, "from"),
+      // Дуудлагын дотор манай тал нь To; BYE-ийн Request-URI нь эсрэг талын Contact.
+      target: header(message, "contact").match(/<([^>]+)>/)?.[1] ?? `sip:${config.server}`,
+      routes: headersNamed(message, "record-route"), byeCseq: 1, codec, rtp, rtpPort, remote: { address: offer.ip, port: offer.port }, sdp,
+    });
+    answering.delete(callId);
 
     call.okResponse = respond(message, "200 OK", from, [contact(), "Allow: INVITE, ACK, BYE, CANCEL, OPTIONS"], sdp, toHeader);
     // ACK иртэл 200-г давтана (UDP алдагдаж болно).
@@ -456,19 +513,128 @@ export async function startSipLine(config: SipConfig): Promise<void> {
     // Мэндчилгээг дуудлага бүрэн холбогдсоны (ACK) дараа эхлүүлнэ: түүнээс өмнө илгээсэн дуу залгагчид хүрэхгүй.
     call.begin = () => {
       call.begin = undefined;
-      if (call.ended) return;
-      handleTwilioMediaStream(socket as unknown as WebSocket);
-      socket.emit("message", JSON.stringify({
-        event: "start",
-        start: { streamSid: callId, callSid: `SIP${token(12)}`, customParameters: { streamToken: issueStreamToken(), callerPhone } },
-      }));
+      startConversation(callId, call, callerPhone);
     };
     call.timers.push(setTimeout(() => call.begin?.(), 2000));
-    call.tickTimer = setTimeout(tick, 0);
-    } catch (error) {
-      releasePort();
-      throw error;
-    }
+  }
+
+  // Шугамаар гадагш залгана (буцааж залгах, захиалга сануулах). Утас дуугарч эхэлбэл true, татгалзвал false.
+  async function dial(number: string, params: Record<string, string> = {}): Promise<boolean> {
+    if (!registered) return false;
+    if (activeCalls() >= MAX_CALLS) return false;
+    const { rtp, rtpPort, mediaIp, mediaPort } = await openRtp();
+    const callId = token(16);
+    const uri = `sip:${number}@${config.server}`;
+    const fromHeader = `<sip:${config.user}@${config.server}>;tag=${token(4)}`;
+    const sdp = buildSdp(mediaIp, mediaPort, [0, 8]);
+    let cseq = 0;
+    let branch = "";
+    let authAttempts = 0;
+    let gotResponse = false;
+    let settled = false;
+    let settle: (ok: boolean) => void = () => {};
+    const result = new Promise<boolean>((resolve) => { settle = resolve; });
+    const finish = (ok: boolean) => {
+      if (!settled) settle(ok);
+      settled = true;
+    };
+    const timers: NodeJS.Timeout[] = [];
+    const viaLine = () => `Via: SIP/2.0/UDP ${publicIp}:${publicPort};branch=${branch};rport`;
+
+    const sendInvite = (auth?: string) => {
+      branch = `z9hG4bK${token()}`;
+      gotResponse = false;
+      const lines = [`INVITE ${uri} SIP/2.0`, viaLine(), "Max-Forwards: 70", `From: ${fromHeader}`, `To: <${uri}>`, `Call-ID: ${callId}`,
+        `CSeq: ${++cseq} INVITE`, contact(), ...(auth ? [auth] : []), "Allow: INVITE, ACK, BYE, CANCEL, OPTIONS", "User-Agent: ai-frontdesk", "Content-Type: application/sdp"];
+      const text = `${lines.join("\r\n")}\r\nContent-Length: ${Buffer.byteLength(sdp)}\r\n\r\n${sdp}`;
+      send(text);
+      // Хариу иртэл давтана (UDP алдагдаж болно).
+      [500, 1000, 2000].forEach((delay) => timers.push(setTimeout(() => {
+        if (!gotResponse && dialing.has(callId)) send(text);
+      }, delay)));
+    };
+    const cleanup = () => {
+      timers.forEach((timer) => clearTimeout(timer));
+      dialing.delete(callId);
+    };
+    const abandon = (reason: string) => {
+      cleanup();
+      rtp.close();
+      rtpPorts.delete(rtpPort);
+      console.error(`[sip] гадагш дуудлага амжилтгүй: ${reason}`);
+      finish(false);
+    };
+    // 2xx-ээс бусад эцсийн хариуг ижил branch-тай ACK-аар баталгаажуулна.
+    const ackFailure = (response: SipMessage) => send([`ACK ${uri} SIP/2.0`, viaLine(), "Max-Forwards: 70", `From: ${fromHeader}`, `To: ${header(response, "to")}`,
+      `Call-ID: ${callId}`, `CSeq: ${cseq} ACK`].join("\r\n") + "\r\nContent-Length: 0\r\n\r\n");
+
+    dialing.set(callId, (response) => {
+      if (!header(response, "cseq").includes("INVITE")) return;
+      // Өмнөх (нууц үггүй) INVITE-ийн давтан хариуг алгасна.
+      if (Number.parseInt(header(response, "cseq"), 10) !== cseq) return;
+      gotResponse = true;
+      const status = Number(response.startLine.split(" ")[1]);
+      const challenge = header(response, "proxy-authenticate") || header(response, "www-authenticate");
+      // Оношлогоо: нууц мэдээлэлгүйгээр хариуны төрөл, challenge-ийн талбаруудыг харуулна.
+      console.log(`[sip] гадагш: ${status} (${header(response, "cseq")})${challenge ? ` challenge ${Object.keys(parseChallenge(challenge)).join(",")}${/stale=true/i.test(challenge) ? " stale" : ""}` : ""}`);
+      if (status < 200) {
+        // Утас дуугарч эхэлсэн (эсвэл оператор хүлээн авсан).
+        finish(true);
+        return;
+      }
+      if ((status === 401 || status === 407) && (authAttempts === 0 || (authAttempts < 3 && /stale=true/i.test(challenge)))) {
+        authAttempts++;
+        ackFailure(response);
+        const challenge = parseChallenge(header(response, status === 401 ? "www-authenticate" : "proxy-authenticate"));
+        const name = status === 401 ? "Authorization" : "Proxy-Authorization";
+        sendInvite(`${name}: ${digestAuthorization({ username: config.user, password: config.password, method: "INVITE", uri, challenge })}`);
+        return;
+      }
+      if (status >= 300) {
+        ackFailure(response);
+        abandon(response.startLine.replace(/\d{6,}/g, "…"));
+        return;
+      }
+      // 200 OK: хариулсан. ACK илгээж, дууг холбоно.
+      cleanup();
+      const answer = parseSdpAudio(response.body);
+      const codec = answer?.payloadTypes.find((type) => type === 0 || type === 8);
+      const routes = headersNamed(response, "record-route").reverse();
+      const target = header(response, "contact").match(/<([^>]+)>/)?.[1] ?? uri;
+      const ackText = [`ACK ${target} SIP/2.0`, via(), "Max-Forwards: 70", ...routes.map((route) => `Route: ${route}`), `From: ${fromHeader}`,
+        `To: ${header(response, "to")}`, `Call-ID: ${callId}`, `CSeq: ${cseq} ACK`].join("\r\n") + "\r\nContent-Length: 0\r\n\r\n";
+      send(ackText);
+      const call = createCall(callId, {
+        invite: response, toHeader: fromHeader, peerHeader: header(response, "to"), target, routes, byeCseq: cseq + 1,
+        codec: codec ?? 0, rtp, rtpPort, remote: { address: answer?.ip ?? serverIp, port: answer?.port ?? 0 }, sdp,
+      });
+      call.acked = true;
+      call.ackText = ackText;
+      finish(true);
+      if (!answer || codec === undefined) {
+        console.error("[sip] гадагш дуудлага: дэмжих codec алга");
+        endCall(callId, true);
+        return;
+      }
+      console.log("[sip] гадагш дуудлагад хариулав");
+      startConversation(callId, call, number, params);
+    });
+
+    console.log("[sip] гадагш залгаж байна");
+    sendInvite();
+    // Хариу ирэхгүй бол болиулна; хэт удаан дуугарвал CANCEL илгээнэ.
+    timers.push(setTimeout(() => {
+      if (!gotResponse && dialing.has(callId)) abandon("операторын хариу ирсэнгүй");
+    }, 8000));
+    timers.push(setTimeout(() => {
+      if (!dialing.has(callId)) return;
+      send([`CANCEL ${uri} SIP/2.0`, viaLine(), "Max-Forwards: 70", `From: ${fromHeader}`, `To: <${uri}>`, `Call-ID: ${callId}`, `CSeq: ${cseq} CANCEL`].join("\r\n") + "\r\nContent-Length: 0\r\n\r\n");
+    }, RING_TIMEOUT_MS));
+    // Цуцалсны дараа 487 ирэхгүй бол цэвэрлэнэ.
+    timers.push(setTimeout(() => {
+      if (dialing.has(callId)) abandon("хариулсангүй");
+    }, RING_TIMEOUT_MS + 5000));
+    return result;
   }
 
   signal.on("message", (data, from) => {
@@ -486,6 +652,17 @@ export async function startSipLine(config: SipConfig): Promise<void> {
 
     if (message.startLine.startsWith("SIP/2.0")) {
       const status = Number(message.startLine.split(" ")[1]);
+      const onDialResponse = dialing.get(callId);
+      if (onDialResponse) {
+        onDialResponse(message);
+        return;
+      }
+      // Хариулсан дуудлагын 200 давтагдвал ACK алдагдсан: дахин илгээнэ.
+      const answered = calls.get(callId);
+      if (answered?.ackText && status === 200 && header(message, "cseq").includes("INVITE")) {
+        send(answered.ackText);
+        return;
+      }
       if (callId !== registerCallId || !header(message, "cseq").includes("REGISTER")) return;
       if (status === 401 || status === 407) {
         const name = status === 401 ? "www-authenticate" : "proxy-authenticate";
@@ -513,7 +690,7 @@ export async function startSipLine(config: SipConfig): Promise<void> {
           startRegister();
           return;
         }
-        if (!registered) console.log(`[sip] ${config.server} дээр бүртгэгдлээ — дуудлага хүлээж байна (гадаад хаяг ${publicIp === "0.0.0.0" ? "олдсонгүй" : "олдсон"}, порт ${publicPort === localPort ? "ижил" : "өөр"})`);
+        if (!registered) console.log(`[sip] …${config.user.slice(-2)} дугаар ${config.server} дээр бүртгэгдлээ — дуудлага хүлээж байна (гадаад хаяг ${publicIp === "0.0.0.0" ? "олдсонгүй" : "олдсон"}, порт ${publicPort === localPort ? "ижил" : "өөр"})`);
         registered = true;
         lastRegisteredAt = Date.now();
       } else if (status >= 300) {
@@ -529,6 +706,11 @@ export async function startSipLine(config: SipConfig): Promise<void> {
 
     const method = message.startLine.split(" ")[0];
     const call = calls.get(callId);
+    // Оношлогоо: INVITE-ийн зам (дугааруудыг нууна).
+    if (process.env.SIP_DEBUG && method === "INVITE") {
+      const mask = (value: string) => value.replace(/\d{5,}/g, "…");
+      console.debug(`[sip] INVITE ${from.address}:${from.port} call ${callId.slice(0, 8)} via ${mask(headersNamed(message, "via").join(" | "))} rr ${mask(headersNamed(message, "record-route").join(" | ") || "-")} contact ${mask(header(message, "contact"))} sdp ${mask(message.body.match(/^c=.*$/m)?.[0] ?? "-")} ${message.body.match(/^m=.*$/m)?.[0] ?? ""}`);
+    }
     if (method === "INVITE") {
       onInvite(message, from).catch((error) => {
         answering.delete(callId);
@@ -559,4 +741,5 @@ export async function startSipLine(config: SipConfig): Promise<void> {
   startRegister();
   setInterval(startRegister, REGISTER_EVERY_MS).unref();
   setInterval(() => send("\r\n\r\n"), KEEPALIVE_MS).unref();
+  return { dial };
 }
