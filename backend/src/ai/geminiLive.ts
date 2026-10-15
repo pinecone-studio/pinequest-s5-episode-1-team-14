@@ -133,7 +133,12 @@ export async function runTool(name: string, args: Record<string, unknown>, conte
   }
 }
 
+// silent: AI чимээгүй; speaking: AI ярьж байна (зөвхөн тод яриа таслана);
+// protected: мэндчилгээ тоглож байна — шинэ яриа сонсохгүй.
+export type SpeechState = "silent" | "speaking" | "protected";
+
 export type GeminiLiveCallbacks = {
+  speechState?: () => SpeechState;
   onOpen?: () => void;
   onText?: (text: string) => void;
   // Дуудагчийн ярианы бичвэр (хэсэг хэсгээр ирнэ) — дуудлагын түүхэнд хадгалахад.

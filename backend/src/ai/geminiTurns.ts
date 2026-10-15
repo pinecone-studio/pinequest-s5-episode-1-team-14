@@ -8,7 +8,7 @@ import { BusinessKnowledgeStore } from "../knowledge/store.js";
 import { belongsTo, DEFAULT_BUSINESS_ID } from "../accounts/store.js";
 import { buildSystemInstruction } from "./callPrompt.js";
 import { chimegeConfigured, toWav, transcribeChimege, warmChimege } from "./chimege.js";
-import { runTool, TOOLS, type GeminiLiveCallbacks } from "./geminiLive.js";
+import { runTool, TOOLS, type GeminiLiveCallbacks, type SpeechState } from "./geminiLive.js";
 
 const MODELS = [process.env.GEMINI_TURN_MODEL || "gemini-3.6-flash", process.env.GEMINI_TURN_FALLBACK || "gemini-3.5-flash"];
 const SAMPLE_RATE = 16_000;
@@ -41,21 +41,35 @@ export function isQuestion(text: string): boolean {
 const MIN_FALLBACK_VOICED_SECONDS = 0.3;
 
 // Дуутай (чимээгүй биш) 20мс хэсгүүдийн нийт урт, секундээр.
-export function voicedSeconds(samples: Int16Array): number {
+export function voicedSeconds(samples: Int16Array, threshold = END_RMS): number {
   const frame = (SAMPLE_RATE * FRAME_MS) / 1000;
   let voiced = 0;
   for (let offset = 0; offset + frame <= samples.length; offset += frame) {
-    if (rms(samples.subarray(offset, offset + frame)) > END_RMS) voiced++;
+    if (rms(samples.subarray(offset, offset + frame)) > threshold) voiced++;
   }
   return (voiced * FRAME_MS) / 1000;
 }
+// AI-ийн дуу зочны утаснаас (чанга яригч) буцаж орвол Чимэгэ AI-ийн өөрийн үгсийг танина.
+// Танигдсан үгсийн ихэнх нь AI-ийн саяхан хэлсэн үгтэй ижил үндэстэй бол цуурай гэж үзнэ.
+const ECHO_SHARE = 0.6;
+const words = (text: string) => (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((word) => word.length >= 3);
+export function isEcho(heard: string, spoken: string): boolean {
+  const said = words(spoken).map((word) => word.slice(0, 4));
+  const got = words(heard);
+  if (!got.length || !said.length) return false;
+  return got.filter((word) => said.includes(word.slice(0, 4))).length / got.length >= ECHO_SHARE;
+}
+
 const RETRY_TEXT = "Уучлаарай, дахиад нэг удаа хэлээд өгөөч?";
 
 const TEXT_INPUT_INSTRUCTION = `Зочны яриаг таних систем текст болгож өгнө. Утасны дуу тул үг алдаатай
 танигдсан байж болно: хамгийн магадлалтай утгаар нь ойлгож хариул. Тоог үсгээр бичсэн ч ("7 цагт") ойлго.
 Хариулт утсаар уншигдах тул богино, тэмдэглэгээгүй энгийн өгүүлбэрээр бич.
 "За"-г зөвхөн зочны хариултыг (нэр, цаг, хүний тоо) хүлээж авахад хэрэглэ; асуултад хариулахдаа бүү
-хэрэглэ. "Ойлголоо" гэж бүү хэл. Хариулт бүрийг "За"-аар бүү эхлүүл.`;
+хэрэглэ. "Ойлголоо" гэж бүү хэл. Хариулт бүрийг "За"-аар бүү эхлүүл.
+Захиалгын асуултад (өдөр, цаг, хүний тоо, нэр) ирсэн хариулт утгагүй эсвэл асуултад тохирохгүй бол
+буруу сонссон гэж үзээд тэр асуултаа дахин асуу, жишээ нь "Уучлаарай, хэдэн хүн гэж хэлсэн бэ?".
+Зочин өөрөө болихоос нааш захиалгыг дуусгалгүй орхиж, өөр сэдэв рүү бүү шилж.`;
 
 const TURN_FORMAT_INSTRUCTION = `Хариултын хэлбэр (ЗААВАЛ): зочны яриа дуугаар ирнэ. Хариултаа ХОЁР мөрөөр бич.
 1-р мөр: зочны хэлснийг яг сонссоноороо, монгол кириллээр, <<...>> хаалтанд. Жишээ: <<Бууз хэдэн төгрөг вэ?>>
@@ -69,8 +83,31 @@ function rms(frame: Int16Array): number {
   return frame.length ? Math.sqrt(sum / frame.length) : 0;
 }
 
+// Арын тогтмол чимээ (кондиционер, сэнс, машин) босгыг давж яриа мэт илрэхгүйн тулд чимээний
+// түвшинг хэмжиж, босгыг түүнээс хэд дахин өндөр тавина. Чимээ удаан өсөж (яриаг чимээ гэж
+// андуурахгүй), хурдан буурна. Чимээгүй шугамд босго анхны утгаараа үлдэнэ.
+const NOISE_RISE = 0.01;
+// Яриа үргэлжилж байх үед маш удаан өснө: дуудлагын дундуур асаасан кондиционер мэт тогтмол
+// чимээ хязгааргүй урт "яриа" болж гацахгүй, жинхэнэ яриа тасрахгүй.
+const NOISE_RISE_IN_SPEECH = 0.002;
+const NOISE_FALL = 0.1;
+const START_OVER_NOISE = 3;
+const END_OVER_NOISE = 2;
+
+export function createNoiseFloor() {
+  let floor = 0;
+  return {
+    observe(level: number, inSpeech = false): void {
+      floor += (level - floor) * (level > floor ? (inSpeech ? NOISE_RISE_IN_SPEECH : NOISE_RISE) : NOISE_FALL);
+    },
+    start: () => Math.max(START_RMS, floor * START_OVER_NOISE),
+    end: () => Math.max(END_RMS, floor * END_OVER_NOISE),
+  };
+}
+
 // 20мс-ийн хэсгүүдийг авч, нэг бүтэн яриа дуусмагц түүнийг буцаана.
 // onStart: яриа эхэлсэн мөчид (жишээ нь холболтыг урьдчилан нээх).
+// listen=false (AI-ийн мэндчилгээ г.м.) үед шинэ яриа эхлүүлэхгүй, зөвхөн чимээний түвшинг хэмжинэ.
 export function createUtteranceDetector(onStart?: () => void) {
   let preRoll: Int16Array[] = [];
   let frames: Int16Array[] = [];
@@ -78,13 +115,15 @@ export function createUtteranceDetector(onStart?: () => void) {
   let loudRun = 0;
   let silentRun = 0;
   let voiced = 0;
+  const noise = createNoiseFloor();
 
-  return (frame: Int16Array): Int16Array | null => {
+  const detect = (frame: Int16Array, listen = true): Int16Array | null => {
     const level = rms(frame);
     if (!speaking) {
+      noise.observe(level);
       preRoll.push(frame);
       if (preRoll.length > PRE_ROLL_FRAMES) preRoll.shift();
-      loudRun = level > START_RMS ? loudRun + 1 : 0;
+      loudRun = listen && level > noise.start() ? loudRun + 1 : 0;
       if (loudRun < START_FRAMES) return null;
       speaking = true;
       onStart?.();
@@ -95,7 +134,8 @@ export function createUtteranceDetector(onStart?: () => void) {
       return null;
     }
     frames.push(frame);
-    if (level > END_RMS) {
+    noise.observe(level, true);
+    if (level > noise.end()) {
       silentRun = 0;
       voiced++;
     } else {
@@ -116,6 +156,8 @@ export function createUtteranceDetector(onStart?: () => void) {
     }
     return out;
   };
+  // Одоогийн "дуутай" босго (16kHz-ийн түвшинд): чимээ мөн эсэхийг шалгахад.
+  return Object.assign(detect, { voiceLevel: () => noise.end() });
 }
 
 // Урсгалаар ирэх хариунаас "<<сонссон>>" мөрийг салгаж, үлдсэнийг хариулт болгон дамжуулна.
@@ -184,9 +226,15 @@ export async function createGeminiTurnSession(
 
   // Дуудлага эхлэхэд (мэндчилгээ уншигдах хооронд) Чимэгэ рүү холболтыг бэлдэнэ.
   if (chimegeConfigured()) warmChimege();
+  // AI ярьж байх үед эхэлсэн яриаг илүү хатуу шүүнэ (чимээ, цуурай AI-г таслахгүй).
+  let state: SpeechState = "silent";
+  let startedWhileSpeaking = false;
   const detect = createUtteranceDetector(() => {
+    startedWhileSpeaking = state !== "silent";
     if (chimegeConfigured()) warmChimege();
   });
+  // AI-ийн саяхан хэлсэн үгс: цуурайг танихад.
+  let spoken = context.greeting ?? "";
   const history: Content[] = [];
   // Таслагдсан (шинэ ярианд дарагдсан) эргэлтийн хариулаагүй бичвэрүүд.
   const unanswered: string[] = [];
@@ -216,7 +264,7 @@ export async function createGeminiTurnSession(
     return parts;
   }
 
-  async function answer(utterance: Int16Array): Promise<void> {
+  async function answer(utterance: Int16Array, whileSpeaking: boolean, voiceLevel: number): Promise<void> {
     const startedAt = Date.now();
     console.log(`[turns] яриа илэрлээ (${(utterance.length / SAMPLE_RATE).toFixed(1)}с)`);
     const loud = normalizeGain(utterance);
@@ -234,7 +282,12 @@ export async function createGeminiTurnSession(
       // Чимэгэ "тав", "дөрвүүлээ" мэт ганц үгийн хариултыг таньж чадаагүй байж болох тул дууг нь Gemini-д
       // өгнө: ярианы өмнөх хэсгийг мэддэг тул ойлгоно, ойлгохгүй бол дахин хэлэхийг хүснэ. Чимээгүй өнгөрөхгүй.
       if (transcript === "" || (transcript && !/[\p{L}\p{N}]{2}/u.test(transcript))) {
-        const voiced = voicedSeconds(utterance);
+        // AI ярьж байх үед танигдаагүй дуу бол чимээ эсвэл цуурай: AI-г таслахгүй.
+        if (whileSpeaking) {
+          console.log("[turns] AI ярьж байхад танигдаагүй дуу — алгасав");
+          return;
+        }
+        const voiced = voicedSeconds(utterance, voiceLevel);
         if (voiced < MIN_FALLBACK_VOICED_SECONDS) {
           console.log(`[turns] яриа танигдсангүй (чимээ, дуутай ${voiced.toFixed(2)}с) — алгасав`);
           return;
@@ -242,6 +295,10 @@ export async function createGeminiTurnSession(
         console.log(`[turns] Чимэгэ таньсангүй (дуутай ${voiced.toFixed(2)}с) — Gemini-ээр сонсоно`);
         transcript = null;
       }
+    }
+    if (whileSpeaking && transcript && isEcho(transcript, spoken)) {
+      console.log("[turns] AI-ийн өөрийн дуу буцаж орсон (цуурай) — алгасав");
+      return;
     }
     // Жинхэнэ яриа: AI ярьж байвал зогсооно.
     if (turn) callbacks.onInterrupted?.();
@@ -266,6 +323,7 @@ export async function createGeminiTurnSession(
       (delta) => {
         if (!firstAt) firstAt = Date.now() - startedAt;
         reply += delta;
+        spoken = reply;
         callbacks.onText?.(delta);
       },
     );
@@ -281,6 +339,7 @@ export async function createGeminiTurnSession(
         clearTimeout(ackTimer);
         if (!firstAt) firstAt = Date.now() - startedAt;
         reply += delta;
+        spoken = reply;
         callbacks.onText?.(delta);
       }
       : parse;
@@ -340,10 +399,11 @@ export async function createGeminiTurnSession(
     sendRealtimeInput(input: { audio?: { data: string; mimeType: string }; text?: string }): void {
       if (closed || !input.audio) return;
       const bytes = Buffer.from(input.audio.data, "base64");
+      state = callbacks.speechState?.() ?? "silent";
       // Buffer-ийн эхлэл тэгш бус байж болох тул хуулж авна.
-      const utterance = detect(new Int16Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + (bytes.length & ~1))));
+      const utterance = detect(new Int16Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + (bytes.length & ~1))), state !== "protected");
       if (!utterance) return;
-      answer(utterance).catch((error) => {
+      answer(utterance, startedWhileSpeaking, detect.voiceLevel()).catch((error) => {
         console.error("[turns] алдаа:", error instanceof Error ? error.message : error);
         callbacks.onError?.(error instanceof Error ? error.message : "алдаа");
       });

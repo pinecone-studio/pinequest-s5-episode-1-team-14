@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createReplyParser, createUtteranceDetector, isQuestion, normalizeGain, toUlaanbaatarTimes, voicedSeconds } from "./geminiTurns.js";
+import { createReplyParser, createUtteranceDetector, isEcho, isQuestion, normalizeGain, toUlaanbaatarTimes, voicedSeconds } from "./geminiTurns.js";
 
 const frame = (level: number) => new Int16Array(320).fill(level);
 
@@ -68,4 +68,44 @@ test("voiced length ignores the silent padding around an utterance", () => {
 test("questions are told apart from answers so we never say За before answering a question", () => {
   for (const text of ["Хорхог хэд вэ?", "Зогсоол байгаа юу", "Хаана байрладаг вэ", "Ням гарагт ажилладаг уу", "Ямар хоол байна"]) assert.equal(isQuestion(text), true, text);
   for (const text of ["Маргааш.", "Тав", "Баярзул", "Орой долоо хагаст", "Тийм ээ"]) assert.equal(isQuestion(text), false, text);
+});
+
+test("a loud air conditioner heard during the greeting is not taken for speech", () => {
+  const detect = createUtteranceDetector();
+  // Мэндчилгээний үеэр зөвхөн чимээний түвшинг хэмжинэ.
+  for (let i = 0; i < 250; i++) assert.equal(detect(frame(500), false), null);
+  for (let i = 0; i < 500; i++) assert.equal(detect(frame(500)), null);
+  // Чимээнээс илт чанга яриа илэрсээр байна.
+  for (let i = 0; i < 40; i++) assert.equal(detect(frame(3000)), null);
+  let utterance: Int16Array | null = null;
+  for (let i = 0; i < 60 && !utterance; i++) utterance = detect(frame(500));
+  assert.ok(utterance);
+  assert.ok(voicedSeconds(utterance, detect.voiceLevel()) < 1);
+});
+
+test("noise that starts mid-call settles instead of becoming endless speech", () => {
+  const detect = createUtteranceDetector();
+  for (let i = 0; i < 100; i++) detect(frame(20));
+  const heard: Int16Array[] = [];
+  for (let i = 0; i < 1500; i++) {
+    const utterance = detect(frame(500));
+    if (utterance) heard.push(utterance);
+  }
+  // Нэг удаа "яриа" болж магадгүй, гэхдээ дуутай хэсэг нь шинэ босгоор чимээ гэж танигдана.
+  assert.ok(heard.length <= 1);
+  for (const utterance of heard) assert.ok(voicedSeconds(utterance, detect.voiceLevel()) < 0.3);
+});
+
+test("nothing new is picked up while the greeting plays", () => {
+  const detect = createUtteranceDetector();
+  for (let i = 0; i < 40; i++) assert.equal(detect(frame(3000), false), null);
+  for (let i = 0; i < 60; i++) assert.equal(detect(frame(0), false), null);
+});
+
+test("the AI's own words coming back through a speakerphone are recognised as echo", () => {
+  const spoken = "Маргааш хэдэн цагт, хэдэн хүний ширээ захиалах вэ?";
+  assert.equal(isEcho("хэдэн цагт хэдэн хүний", spoken), true);
+  assert.equal(isEcho("Маргааш орой долоон цагт", spoken), false);
+  assert.equal(isEcho("Ганцаараа", spoken), false);
+  assert.equal(isEcho("", spoken), false);
 });
