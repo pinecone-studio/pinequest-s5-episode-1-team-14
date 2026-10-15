@@ -1,200 +1,278 @@
-# pinequest-s5-episode-1-team-14
+# CallAI — AI phone receptionist for Mongolian businesses
 
-AI Front-Desk Mongolia — an AI receptionist that answers a small business's
-real phone number in Mongolian, answers questions grounded in the business's
-own knowledge base, and books appointments on a real calendar.
+CallAI answers a small business's real phone number in Mongolian. It greets
+callers by the business name, answers questions from the business's own
+knowledge base, books, checks and cancels reservations on Google Calendar,
+and hands the caller over to a person when it cannot help. Owners sign in to a
+web dashboard to read call transcripts, see bookings, edit what the AI knows,
+and pick the AI's voice.
 
-The description above is the product goal. The current repository is a scaffold
-with one manual Gemini Live experiment; a working phone agent is not implemented yet.
+| | |
+| --- | --- |
+| Website and dashboard | [callai.world](https://callai.world) |
+| Demo phone number | **7515 5562** (call from any Mongolian phone) |
+| Backend API | `https://api.callai.world` |
 
-## Repository audit
+## How a call works
 
-Initial audited base: `main` at `a16b0d0` (2026-10-06). The fresh checkout was clean
-and matched `origin/main`. Setup details below include the dependency/CI follow-up.
-The official repository is
-`pinecone-studio/pinequest-s5-episode-1-team-14`.
-
-```text
-package.json                 npm workspaces: backend, pwa
-package-lock.json            locked dependencies for both workspaces
-.nvmrc                       exact Node.js version used locally and in CI
-.github/workflows/ci.yml      PR lint/build checks targeting main
-backend/
-  .env.example               server-side environment template
-  package.json               Node.js + TypeScript, ws, dotenv, @google/genai
-  src/
-    index.ts                 prints a placeholder message; opens no port
-    ai/geminiLive.ts          session wrapper stub
-    ai/test-live-mongolian.ts manual Gemini Live experiment
-    telephony/twilio.ts       media stream stub
-    voice/elevenlabs.ts       TTS stub
-    knowledge/rag.ts          knowledge lookup stub
-    calendar/googleCalendar.ts availability checks and booking creation
-    calls/store.ts            persistent call lifecycle metadata
-pwa/
-  package.json               Next.js 14 + React 18 + TypeScript
-  app/layout.tsx             Mongolian document language and metadata
-  app/page.tsx               placeholder home page at /
+```mermaid
+flowchart LR
+  phone([Caller's phone]) <--> op[Mobinet<br/>IP-phone line]
+  op <-- "SIP + RTP (G.711)" --> sip[backend<br/>telephony/sip.ts]
+  sip --> vad[End-of-speech<br/>detection]
+  vad --> stt[Chimege<br/>speech-to-text]
+  stt --> llm[Gemini Flash<br/>answer + tools]
+  llm <--> kb[(Knowledge base)]
+  llm <--> cal[(Google Calendar)]
+  llm --> tts[ElevenLabs<br/>text-to-speech]
+  tts --> sip
 ```
 
-### Current implementation
+1. The backend registers on Mobinet's SIP server as the phone for the business
+   number, so calls arrive directly — no call forwarding and no Twilio.
+2. Caller audio (8 kHz μ-law or A-law) is split into utterances by silence
+   detection. Breathing and line noise do not interrupt the AI.
+3. Each utterance is transcribed by **Chimege**, a Mongolian speech recogniser.
+   If Chimege is not configured or fails, the audio goes to Gemini directly.
+4. **Gemini Flash** reads the text with the business's instructions and
+   knowledge, and calls tools when needed: `check_availability`,
+   `create_appointment`, `find_my_bookings`, `cancel_appointment`,
+   `request_human`.
+5. While the answer is prepared, a short acknowledgement ("За") can play so the
+   caller is not left in silence. The reply is spoken by **ElevenLabs**, sped
+   up 1.15× without changing pitch, and streamed back over RTP.
+6. The call, its transcript, intent and any booking are saved and appear in
+   the dashboard.
 
-| Area | What exists now |
+## Features
+
+**On the phone**
+
+- Natural Mongolian: one question at a time, short confirmations
+  ("Баталгаажуулъя: …, Зөв үү?"), suffixes that follow vowel harmony.
+- Numbers, prices, times and phone numbers are spoken as words
+  ("арван найман мянга", "орой долоо хагаст", "ерэн ес, арван нэг…").
+- Answers business questions only from approved knowledge and says so when
+  something is not recorded, instead of guessing prices or addresses.
+- Restaurant bookings with table capacity (`TABLE_COUNT`, `SEATS_PER_TABLE`);
+  if the requested time is full, offers the nearest free time.
+- Callers can look up and cancel their own bookings (only for the number they
+  call from).
+- Hands over to staff with the caller's name and reason.
+- Outbound calls over the same SIP line: booking reminders and test calls
+  from the dashboard (rate limited).
+- Several businesses and SIP numbers on one backend; each number belongs to
+  one business and its SIP password is stored encrypted.
+
+**In the dashboard** ([callai.world](https://callai.world))
+
+- Sign up and log in; every page requires a session and shows only the
+  signed-in business's data.
+- Overview, call history with transcripts, bookings, analytics.
+- Knowledge base editor.
+- Settings: business name and AI voice (Уянга, Наран, Оюуна, with samples).
+- Test call page: the AI calls you.
+
+## Measurements
+
+Recorded by the team on real phone calls; small samples, not a benchmark.
+
+Recognising Mongolian phone speech (one recorded call, five questions):
+
+| Model | Correctly understood |
 | --- | --- |
-| Package manager | npm 11.12.1, declared root workspaces `backend` and `pwa`, one committed root lockfile |
-| Frontend | Next.js App Router scaffold; no dashboard, API client, mock adapter, Tailwind configuration, or browser call UI |
-| Backend | Strict TypeScript; entry point only logs, even though its message says “listening” |
-| APIs | No HTTP routes, Next.js API routes, or WebSocket server; `ws` is installed as a declared dependency but unused |
-| Gemini | Manual script loads `backend/.env`, connects with AUDIO output and transcription, then sends three Mongolian prompts |
-| Other integrations | Gemini wrapper, Twilio and ElevenLabs remain stubs; Calendar supports availability and booking creation, with no runtime callers yet (see [Calendar setup](backend/src/calendar/README.md)) |
-| Database/storage | Local JSON business knowledge and [call sessions](backend/src/calls/README.md), plus Google Calendar booking events; no database client |
-| Shared packages | None; add shared contracts only when a real frontend/backend integration needs them |
-| Environment | `backend/.env.example` exists; no frontend environment variables are currently read |
-| Testing | Offline Knowledge/RAG, Calendar and call storage tests plus the live Gemini script; strict backend typechecking runs through `build:backend` |
+| Gemini Live models (3.8 Live, 3.1 Flash Live, 3.5 Transcribe Live) | 0 / 5 |
+| ElevenLabs Scribe | 1 / 5 |
+| Gemini 3.6 Flash (audio in) | 3–4 / 5 |
 
-The Gemini experiment hard-codes `gemini-3.8-live`; availability and access have
-not been verified. It spaces messages using a four-second delay rather than
-waiting for a completed turn. Its restaurant facts are sample prompt content,
-not an approved knowledge store. The reusable wrapper's TEXT-output comment
-also differs from the experiment's AUDIO configuration. Resolve these points
-in the Gemini PRs before using the experiment in a real call.
+Gemini Flash also invented sentences the caller never said when the audio was
+unclear, which is why recognition moved to Chimege.
 
-## Local setup
+Latency after the caller stops speaking:
 
-Use [Node.js **24.15.0**](https://nodejs.org/en/download/archive/v24.15.0) with its
-bundled npm **11.12.1**. The exact Node.js version is in `.nvmrc`; CI reads that
-same file. `package.json` declares npm 11.12.1 and
-the compatible Node.js 24 / npm 11 major versions. If you use nvm, run
-`nvm install 24.15.0` and `nvm use 24.15.0`; otherwise install the version in `.nvmrc`
-with your usual Node.js installer. Check `node --version` and `npm --version`
-before installing dependencies.
+| Step | Before | Now |
+| --- | --- | --- |
+| Chimege recognition | ~1.8 s | ~0.9 s (connection kept warm) |
+| First audio the caller hears | ~2.9 s | ~1.45 s |
 
-From the repository root:
+The full spoken answer still takes several seconds when Gemini or a calendar
+lookup is slow. Gemini Live answered in about a second but understood no
+Mongolian phone speech, so the slower turn-based design was chosen for
+accuracy.
+
+## Repository layout
+
+npm workspaces with two packages:
+
+```text
+backend/                       Node.js + TypeScript server (no framework)
+  src/index.ts                 HTTP API, /voice webhook, /media-stream WebSocket, SIP start-up
+  src/telephony/
+    sip.ts                     SIP registration, incoming/outgoing calls, RTP audio
+    lines.ts, addLine.ts       SIP numbers per business (encrypted passwords)
+    twilio.ts                  call session: audio in/out, barge-in, speech queue
+    reminder.ts                booking reminder calls
+    callback.ts                Twilio "call me back" (optional, earlier fallback)
+    twilioSignature.ts, streamTokens.ts   Twilio request validation
+  src/ai/
+    geminiTurns.ts             turn-based listening: utterance detection → Chimege/Gemini
+    chimege.ts                 Chimege speech-to-text client
+    geminiLive.ts              tool declarations and the older Gemini Live mode
+    callPrompt.ts              system instructions per business
+    mongolianSuffix.ts         vowel-harmony suffixes for names
+  src/voice/
+    elevenlabs.ts, settings.ts ElevenLabs streaming TTS and voice settings
+    spokenNumbers.ts           numbers, times and phone numbers as Mongolian words
+    timeStretch.ts             pitch-preserving speed-up (WSOLA)
+  src/knowledge/               knowledge store, keyword lookup with Mongolian morphology, seed data
+  src/calendar/                Google Calendar availability, booking, cancelling, tables
+  src/calls/                   call sessions, transcripts, intent
+  src/accounts/                users, businesses, sessions (scrypt + signed tokens), rate limits
+  src/storage/jsonFile.ts      JSON-file persistence in backend/data/ (git-ignored)
+pwa/                           Next.js 14 (App Router)
+  app/page.tsx                 landing page
+  app/login, app/signup        authentication pages
+  app/(workspace)/             dashboard, calls, bookings, knowledge, analytics, settings, demo
+  app/api/                     server routes that proxy to the backend with the API token
+  middleware.ts                redirects signed-out users to /login
+```
+
+More detail: [calendar](backend/src/calendar/README.md),
+[call sessions](backend/src/calls/README.md),
+[knowledge](backend/src/knowledge/README.md).
+
+## Running locally
+
+Use Node.js **24.15.0** (`.nvmrc`) with npm 11.
 
 ```bash
 npm ci
-cp backend/.env.example backend/.env
+cp backend/.env.example backend/.env      # then fill in the values below
+(cd backend && npx tsx src/knowledge/seed.ts)   # sample restaurant knowledge
 ```
 
-PowerShell equivalent (use `npm.cmd` if execution policy blocks `npm.ps1`):
-
-```powershell
-npm.cmd ci
-Copy-Item backend/.env.example backend/.env
-```
-
-Copy the template only for a new checkout; preserve an existing local `.env`.
-Run [`npm ci`](https://docs.npmjs.com/cli/v11/commands/npm-ci/) from the root to
-install both workspaces from `package-lock.json`. It replaces installed
-dependencies and fails if a manifest disagrees with the
-lockfile. Use `npm install` only when intentionally changing dependencies, and
-commit the updated manifest and root lockfile together in that feature's PR.
-
-Run these in separate terminals from the root:
+Create `pwa/.env.local`:
 
 ```bash
-npm run dev:backend
-npm run dev:pwa
+BACKEND_API_URL=http://localhost:8080
+BACKEND_API_TOKEN=<same value as DASHBOARD_API_TOKEN>
+NEXT_PUBLIC_USE_MOCK_API=false
 ```
 
-The frontend is available at `http://localhost:3000`. The backend command runs
-the placeholder in watch mode; there is no service at port 8080 yet.
+Start both, in separate terminals:
 
-### Environment variables
+```bash
+npm run dev:backend    # http://localhost:8080
+npm run dev:pwa        # http://localhost:3000
+```
 
-Backend scripts use `dotenv/config`. The root workspace scripts run in
-`backend/`, so credentials belong in `backend/.env`, not a root or frontend env file.
+To receive real calls on your machine, set the `SIP_*` variables. Only one
+backend may be registered for a number at a time, so stop the production
+backend's line first, or calls will go to the wrong place. A home router's NAT
+can drop the SIP registration; a server with a public IP is far more reliable.
+Set `NEXT_PUBLIC_USE_MOCK_API=true` to browse the dashboard with sample data and
+no backend.
 
-| Variable | Current usage |
+### Backend environment (`backend/.env`)
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `PORT` | no | HTTP port, default `8080` |
+| `GEMINI_API_KEY` | yes | Gemini; use a paid tier (the free tier allows 20 requests per model per day) |
+| `GEMINI_TURN_MODEL`, `GEMINI_TURN_FALLBACK` | no | Override the Flash models used for answers |
+| `AI_MODE` | no | `live` switches back to Gemini Live listening |
+| `CHIMEGE_API_KEY` | recommended | Chimege speech-to-text |
+| `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` | yes | Text-to-speech and default voice |
+| `ELEVENLABS_MODEL_ID` | no | TTS model, default `eleven_v4_turbo` |
+| `VOICE_MODE` | no | `gemini` uses Gemini's own voice instead of ElevenLabs |
+| `VOICE_OPTIONS` | no | Voices offered in settings: `uyanga:<id>,naran:<id>,oyuna:<id>` |
+| `VOICE_STABILITY`, `VOICE_STYLE` | no | ElevenLabs voice settings, default `0.45` and `0.15` |
+| `SPEECH_SPEED` | no | Playback speed 0.8–1.3, default `1.15` |
+| `SIP_SERVER`, `SIP_USER`, `SIP_PASSWORD` | for calls | Operator SIP domain, phone number and password of the first line |
+| `SIP_PORT`, `SIP_RTP_PORT_START` | no | Default `5060` and `10000`; open these UDP ports |
+| `SIP_PUBLIC_IP` | no | Only if public IP auto-detection is wrong |
+| `SIP_DEBUG`, `SIP_RECORD_DIR` | no | Diagnostics: log SIP traffic / save raw caller audio |
+| `LINE_SECRET` | no | Key for encrypting stored SIP passwords, falls back to `SESSION_SECRET` |
+| `SESSION_SECRET` | yes | Signs login sessions; falls back to `DASHBOARD_API_TOKEN` |
+| `DASHBOARD_API_TOKEN` | yes | Shared secret between the PWA server and the backend API |
+| `OWNER_EMAILS` | no | Comma-separated emails that own the default business's existing data |
+| `BUSINESS_NAME` | no | Name of the default business, used in the greeting |
+| `TABLE_COUNT`, `SEATS_PER_TABLE` | no | Restaurant capacity, default `1` and `4` |
+| `GOOGLE_CALENDAR_CLIENT_EMAIL`, `GOOGLE_CALENDAR_PRIVATE_KEY`, `GOOGLE_CALENDAR_ID` | for bookings | Service account with "Make changes to events" on the calendar ([setup](backend/src/calendar/README.md)) |
+| `CALLBACK_HOURLY_LIMIT` | no | Outbound calls per hour, default `5` |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, `PUBLIC_URL` | no | Optional Twilio path (incoming webhook and "call me back") |
+
+### PWA environment
+
+| Variable | Purpose |
 | --- | --- |
-| `PORT` | Defaults to `8080`; only displayed by the backend placeholder |
-| `GEMINI_API_KEY` | Required only for the manual Gemini experiment |
-| `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` | Reserved for the TTS integration; unused today |
-| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` | Reserved for telephony; unused today |
-| `GOOGLE_CALENDAR_CLIENT_EMAIL`, `GOOGLE_CALENDAR_PRIVATE_KEY`, `GOOGLE_CALENDAR_ID` | Required for Calendar availability and booking; booking needs writer access to the shared calendar ([setup](backend/src/calendar/README.md)) |
+| `BACKEND_API_URL` | Backend base URL, default `http://localhost:8080` |
+| `BACKEND_API_TOKEN` | Same value as the backend's `DASHBOARD_API_TOKEN` |
+| `NEXT_PUBLIC_USE_MOCK_API` | `true` shows sample data without a backend |
+| `NEXT_PUBLIC_DEMO_NUMBER` | Phone number shown on the landing page |
 
-No credentials are required for the scaffold's lint/build or frontend page.
-Keep real values in ignored local env files. Only `.env.example` templates with
-empty secrets belong in Git. Never put private keys or provider tokens in
-`NEXT_PUBLIC_*` variables. Add `NEXT_PUBLIC_API_BASE_URL` and a centralized mock
-mode when the frontend API adapter is implemented; neither is consumed now.
+`NEXT_PUBLIC_*` values are baked in at build time; rebuild after changing them.
+Never put secrets in them.
 
-## Scripts and validation
+### Adding a phone line
 
-Run root scripts from the repository root. Use `--workspace` for package scripts.
+Run on the server, then restart the backend. The password is read from stdin so
+it stays out of the shell history:
 
-| Location | Existing scripts |
-| --- | --- |
-| Root | `dev:backend`, `dev:pwa`, `build:backend`, `build:pwa`, `lint` |
-| `backend` | `dev`, `build`, `start`, `lint`, `test:gemini-mn`, `test:knowledge`, `test:calendar`, `test:calls` |
-| `pwa` | `dev`, `build`, `start`, `lint` |
+```bash
+cd backend
+printf '%s' "<SIP password>" | npm run line:add -- <8-digit number> <owner email | default>
+```
+
+`default` links the number to the default business. The password is stored
+encrypted with `LINE_SECRET`.
+
+## Deployment
+
+| Part | Where | Why |
+| --- | --- | --- |
+| Backend | Vultr VPS (Seoul), behind Caddy at `api.callai.world` | SIP needs inbound UDP for signalling and RTP audio, which Railway does not support |
+| PWA | Railway, custom domain `callai.world` | Plain Next.js hosting |
+
+Backend server requirements: a public IPv4 address, Node.js 24, inbound UDP
+`5060` and `10000` upwards (two ports per concurrent call), TCP `80`/`443` for
+HTTPS. Run a single backend process: one-time tokens and rate limits live in
+memory, and two processes registering the same number would both receive its
+calls. Data lives in `backend/data/` as JSON files, so keep that directory on
+persistent disk.
+
+Build and start:
+
+```bash
+npm ci
+npm run build:backend && npm run start --workspace=backend
+npm run build:pwa && npm run start --workspace=pwa
+```
+
+## Tests and checks
 
 ```bash
 npm run lint
+npm run test:knowledge --workspace=backend
+npm run test:calendar --workspace=backend
+npm run test:calls --workspace=backend
+npm run test:telephony --workspace=backend
+npm run test:call-flow --workspace=backend
+npm run test:accounts --workspace=backend
+npm run test:analytics --workspace=pwa
+npm run test:session --workspace=pwa
 npm run build:backend
 npm run build:pwa
 ```
 
-The backend build runs strict TypeScript checking and emits `backend/dist/`.
-The Next.js build includes frontend type checking. No standalone `typecheck`
-script is defined; offline checks use the `test:*` scripts above. Production `start` scripts
-require their corresponding build first; backend `start` still only prints
-the placeholder message and exits.
+Tests are offline (`node:test` via `tsx`) and cover SIP parsing and RTP, audio
+codecs, utterance detection, Chimege handling, spoken numbers, time
+stretching, knowledge lookup, calendar booking and table capacity, accounts,
+sessions and analytics. The GitHub Actions workflow
+(`.github/workflows/ci.yml`) runs lint, both builds and every test script above
+except `test:accounts` and `test:session` on pull requests to `main`.
 
-Optional manual provider check, after configuring `GEMINI_API_KEY`:
+Manual checks that call real providers: `npm run test:gemini-mn --workspace=backend`
+and `backend/src/ai/test-function-calling.ts`.
 
-```bash
-npm run test:gemini-mn --workspace=backend
-```
-
-This makes real API requests and may consume provider quota; it is not an
-offline regression test or proof that the phone flow works. The hard-coded
-model must first be verified for the configured account.
-
-CI runs `npm ci`, lint, offline Knowledge/RAG, Calendar and call storage tests,
-and both builds for PRs to `main`. It selects Node.js from
-`.nvmrc` and keys the npm cache from the root `package-lock.json`. Local checks
-should use that same runtime and locked install.
-
-## Proposed small PR sequence
-
-Each row is one branch and one PR. The audit (row 1) is merged; the dependency/CI
-follow-up covers only row 2.
-Implement each later row after the preceding dependency has been approved,
-merged, and pulled from `main`. This sequence reuses the existing scaffolds
-and experiment; it does not import another repository.
-
-| Order | Branch | Reviewable scope |
-| --- | --- | --- |
-| 1 | `chore/repository-audit` | Actual architecture, setup/validation docs, env template comments, and ignore rules |
-| 2 | `chore/reproducible-install` | Commit npm lockfile, select supported runtime, make CI use the locked install |
-| 3 | `feat/gemini-client` | Reuse the installed SDK and experiment; validate configuration and model access |
-| 4 | `feat/gemini-live-session` | Implement the existing wrapper with turn completion, errors, and cleanup |
-| 5 | `feat/twilio-voice-webhook` | HTTP entry point and validated incoming-call webhook returning stream instructions |
-| 6 | `feat/twilio-media-stream` | Implement WebSocket start/media/stop lifecycle in the existing telephony module |
-| 7 | `feat/audio-codecs` | Tested mu-law/PCM conversion and the sample rates required by the providers |
-| 8 | `feat/elevenlabs-tts` | Implement the existing TTS module using an available voice; cloning can follow later |
-| 9 | `feat/phone-conversation` | Connect the reviewed modules for one real incoming Mongolian conversation |
-| 10 | `feat/knowledge-store` | Choose persistence and add approved business information schema/data access |
-| 11 | `feat/rag-grounding` | Implement verified lookup and an explicit no-result response in the existing RAG module |
-| 12 | `feat/calendar-availability` | Calendar configuration and available-slot tool with timezone handling |
-| 13 | `feat/calendar-booking` | Confirmed, duplicate-safe booking creation and persisted calendar event IDs |
-| 14 | `feat/call-sessions` | Persist call lifecycle metadata and expose the read API needed by the dashboard |
-| 15 | `feat/web-api-adapter` | Frontend API configuration and centralized mock data; share consumed API types |
-| 16 | `feat/web-dashboard-shell` | Existing `pwa` navigation/layout and responsive dashboard shell |
-| 17 | `feat/web-dashboard-overview` | Summary API plus KPI cards, recent activity, and system status |
-| 18 | `feat/web-calls` | Call history/detail UI using the reviewed call API |
-| 19 | `feat/web-bookings` | Booking read API and booking list/status UI |
-| 20 | `feat/web-knowledge` | Validated knowledge CRUD API and management UI |
-| 21 | `feat/web-analytics` | Defined metrics/aggregates and analytics view |
-| 22 | `feat/web-demo` | Browser conversation fallback using the reviewed backend |
-| 23 | `feat/web-settings` | Non-secret business settings and integration status |
-| 24 | `feat/guardrails` | Explicit human handoff and domain/factual fallback behavior |
-| 25 | `test/end-to-end-demo` | Real-call, booking, grounding, and browser fallback integration checks |
-| 26 | `docs/demo-guide` | Final setup, demo rehearsal, known limitations, and operating guide |
-
-Keep trust-boundary validation and error handling in the feature that introduces
-them. If a row grows beyond one reviewable feature, split it before implementation.
-The sequence is a proposed dependency order, not a guarantee of the 14-day schedule.
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for the branch/approval workflow.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the branch and review workflow.
