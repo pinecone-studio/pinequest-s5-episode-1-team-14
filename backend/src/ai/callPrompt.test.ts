@@ -37,3 +37,13 @@ test("calendar tools are refused for businesses without their own calendar", asy
   const result = await runTool("check_availability", {}, { businessId: "cafe" }) as { error?: string };
   assert.match(result.error ?? "", /календарь холбогдоогүй/);
 });
+
+test("a business without a calendar hands requests to staff instead of following restaurant rules", () => {
+  const now = new Date("2026-10-14T02:00:00Z");
+  const handoff = buildSystemInstruction({ knowledge: [], businessName: "CallAI", bookingEnabled: false, now });
+  assert.match(handoff, /request_human-ийг нэр, шалтгааных нь хамт/);
+  assert.doesNotMatch(handoff, /partySize|хорхог|тогоочийн/);
+  const restaurant = buildSystemInstruction({ knowledge: [], now });
+  assert.match(restaurant, /partySize/);
+  assert.doesNotMatch(restaurant, /Чи энэ бизнест цаг шууд захиалж чадахгүй/);
+});

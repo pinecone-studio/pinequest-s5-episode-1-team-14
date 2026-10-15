@@ -145,8 +145,8 @@ export type GeminiLiveCallbacks = {
   // тоглуулж буй/дараалалд буй хариултыг шууд зогсоох дохио.
   onInterrupted?: () => void;
   // Зочны яриа танигдмагц (хариултаас өмнө) богино үг хэлэх.
-  onAck?: () => void;
-  // Календарь шалгах мэт удаан үйлдлийн өмнө хэлэх богино үг ("Нэг хором.").
+  onAck?: (text: string) => void;
+  // Календарь шалгах мэт удаан үйлдлийн өмнө хэлэх богино үг ("За, түр хүлээгээрэй.").
   onHold?: (text: string) => void;
   // Function бүр ажилласны дараа — дуудлагыг захиалга, зорилготой нь холбоход.
   onToolResult?: (name: string, result: unknown) => void;
@@ -170,6 +170,7 @@ export async function createGeminiLiveSession(
     greeting: context.greeting,
     extra: context.extra,
     businessName: context.businessName,
+    bookingEnabled: !context.businessId || context.businessId === DEFAULT_BUSINESS_ID,
   });
 
   const session = await ai.live.connect({

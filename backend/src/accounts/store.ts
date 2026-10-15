@@ -10,7 +10,8 @@ export const DEFAULT_BUSINESS_ID = "default";
 const SESSION_DAYS = 7;
 
 // voice: VOICE_OPTIONS дахь түлхүүр (uyanga, naran, oyuna); байхгүй бол анхдагч дуу.
-export type Business = { id: string; name: string; createdAt: string; voice?: string };
+// greeting: эзний бичсэн мэндчилгээ; байхгүй бол нэрээс автоматаар үүснэ.
+export type Business = { id: string; name: string; createdAt: string; voice?: string; greeting?: string };
 
 // Хэрэглэгчийн сонгох боломжтой дуунууд. ID нь ElevenLabs бүртгэлээс хамаарах тул орчны хувьсагчид:
 // VOICE_OPTIONS=uyanga:<id>,naran:<id>,oyuna:<id>
@@ -134,7 +135,7 @@ export class AccountStore {
   }
 
   // Бизнесийн нэр, дууг солино. Үндсэн бизнесийг анх удаа засахад файлд бичигдэнэ.
-  updateBusiness(businessId: string, input: { name?: unknown; voice?: unknown }): Business | "invalid" {
+  updateBusiness(businessId: string, input: { name?: unknown; voice?: unknown; greeting?: unknown }): Business | "invalid" {
     const current = this.businesses().find((business) => business.id === businessId);
     if (!current) return "invalid";
     const next: Business = { ...current };
@@ -147,6 +148,12 @@ export class AccountStore {
       if (input.voice === null || input.voice === "") delete next.voice;
       else if (typeof input.voice === "string" && voiceIdFor(input.voice)) next.voice = input.voice;
       else return "invalid";
+    }
+    if (input.greeting !== undefined) {
+      const greeting = typeof input.greeting === "string" ? input.greeting.trim() : "";
+      if (greeting.length > 300 || /\p{Cc}/u.test(greeting)) return "invalid";
+      if (greeting) next.greeting = greeting;
+      else delete next.greeting;
     }
     const stored = (readJsonArray(this.businessesPath) as Business[]).filter((business) => business.id !== businessId);
     writeJsonArray(this.businessesPath, [...stored, next]);

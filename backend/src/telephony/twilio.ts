@@ -8,8 +8,8 @@ import type { WebSocket, RawData } from "ws";
 import { createGeminiLiveSession } from "../ai/geminiLive.js";
 import { createGeminiTurnSession } from "../ai/geminiTurns.js";
 import { AccountStore, DEFAULT_BUSINESS_ID, voiceIdFor } from "../accounts/store.js";
-import { ACK_PHRASES, CALL_GREETING } from "../ai/callPrompt.js";
-import { speakPhoneNumbers } from "../voice/spokenNumbers.js";
+import { greetingFor } from "../ai/callPrompt.js";
+import { speakNumbers, speakPhoneNumbers, speakTimes } from "../voice/spokenNumbers.js";
 import { createTimeStretcher } from "../voice/timeStretch.js";
 
 import { cachedUlaw8k, streamUlaw8k } from "../voice/elevenlabs.js";
@@ -188,7 +188,7 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
   // хурдаар тоглуулдаг тул 20мс-ийн таймер хэрэггүй.
   async function speak(text: string, generation: number, fixed: boolean): Promise<void> {
     if (closed || generation !== speechGeneration || !text.trim()) return;
-    const audio = fixed ? [await cachedUlaw8k(text, callVoiceId)] : await streamUlaw8k(speakPhoneNumbers(text), callVoiceId);
+    const audio = fixed ? [await cachedUlaw8k(text, callVoiceId)] : await streamUlaw8k(speakNumbers(speakTimes(speakPhoneNumbers(text))), callVoiceId);
     streaming = true;
     // eleven_v4_turbo speed тохиргоог үл тоодог тул дууг өндрийг нь хадгалан энд хурдасгана.
     const stretcher = SPEECH_SPEED === 1 ? null : createTimeStretcher(SPEECH_SPEED);
@@ -231,7 +231,6 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
     if (!closed) sendAudio(encodeMuLaw(downsample(pcm24k)));
   }
 
-  let ackIndex = 0;
   let callVoiceId: string | undefined;
 
   // Хариултыг бүтнээр нь нэг дор уншуулна: өгүүлбэр бүрийг тусад нь уншвал аялга тасарч,
@@ -246,8 +245,8 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
     enqueueSpeak(text, true);
   }
 
-  function onAck(): void {
-    enqueueSpeak(ACK_PHRASES[ackIndex++ % ACK_PHRASES.length], true);
+  function onAck(text: string): void {
+    enqueueSpeak(text, true);
   }
 
   function onToolResult(name: string, result: unknown): void {
@@ -329,8 +328,8 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
         // Сануулах дуудлагад мэндчилгээ, заавар нь захиалга бүрээр өөр (кэшлэхгүй).
         const params = message.start.customParameters ?? {};
         const reminder = params.direction === "reminder" && params.greeting ? params : null;
-        // Өөр бизнесийн дугаарт нэрээ хэлж мэндэлнэ.
-        const greeting = reminder?.greeting ?? (businessName ? `Сайн байна уу? ${businessName}-ийн AI туслах байна. Танд юугаар туслах вэ?` : CALL_GREETING);
+        // Бизнесийн нэрээр мэндэлнэ.
+        const greeting = reminder?.greeting ?? business?.greeting ?? greetingFor(business?.name);
         if (!nativeVoice) {
           enqueueSpeak(greeting, !reminder);
           transcript.say("agent", greeting);

@@ -95,3 +95,15 @@ test("businesses can rename themselves and pick one of the offered voices", (con
   store.updateBusiness(DEFAULT_BUSINESS_ID, { voice: null });
   assert.equal(store.businesses().find((business) => business.id === DEFAULT_BUSINESS_ID)?.voice, undefined);
 });
+
+test("a business can set and clear its own greeting", (context) => {
+  const dir = mkdtempSync(join(tmpdir(), "business-greeting-"));
+  context.after(() => rmSync(dir, { recursive: true, force: true }));
+  const store = new AccountStore(dir);
+  store.updateBusiness(DEFAULT_BUSINESS_ID, { greeting: "  Сайн байна уу, Тал Нутаг ресторан байна.  " });
+  assert.equal(store.businesses()[0].greeting, "Сайн байна уу, Тал Нутаг ресторан байна.");
+  assert.equal(store.updateBusiness(DEFAULT_BUSINESS_ID, { greeting: "x".repeat(301) }), "invalid");
+  store.updateBusiness(DEFAULT_BUSINESS_ID, { greeting: "" });
+  assert.equal(store.businesses()[0].greeting, undefined);
+});
+
