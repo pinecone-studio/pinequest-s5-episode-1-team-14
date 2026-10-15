@@ -1,4 +1,4 @@
-/* AI Front-Desk dashboard — нэг тогтмол бараан загвар.
+/* CallAI dashboard — нэг тогтмол бараан загвар.
    Хэмжээс: зай 4px-ийн үржвэр, текст 12/13/14/22/26, булан 6/10. */
 :root {
   color-scheme: dark;
@@ -308,4 +308,45 @@ ul { padding: 0; list-style: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
+}
+
+/* ---------- Нэвтрэх ---------- */
+.login { display: grid; place-items: center; min-height: 100dvh; padding: 24px 16px; }
+.login-card { display: grid; gap: 20px; width: 100%; max-width: 380px; padding: 28px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.login-brand { width: fit-content; padding: 0; }
+.login-field { display: grid; gap: 6px; color: var(--text-2); font-size: 13px; font-weight: 500; }
+.login-field .input { height: 40px; font-size: 14px; }
+.login-card .btn-primary { height: 40px; font-size: 14px; }
+.login-error { margin-top: -8px; color: var(--red); font-size: 13px; }
+.login-logout { padding: 0; height: auto; color: var(--text-2); }
+.login-logout:hover { color: var(--text); }
+.login-switch { font-size: 13px; text-align: center; }
+.login-switch a { color: var(--accent); }
+.account { display: grid; gap: 2px; overflow: hidden; }
+.account b { color: var(--text); font-size: 13px; font-weight: 600; }
+.account span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- Тохиргоо, туршилтын дуудлага ---------- */
+.settings { display: grid; gap: 16px; }
+.settings-number { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 14px; }
+.voice-list { display: grid; }
+.voice-option { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 0 16px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.voice-option:last-child { border-bottom: 0; }
+.voice-option:hover { background: var(--surface-2); }
+.voice-option.is-selected { background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.voice-option input { accent-color: var(--accent-solid); }
+.voice-option .icon { color: var(--text-3); }
+.voice-option.is-selected .icon { color: var(--accent); }
+.voice-label { flex: 1; color: var(--text); font-size: 14px; }
+.test-call { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.test-call .form { align-content: start; row-gap: 8px; }
+.test-call-row { display: flex; gap: 8px; }
+.test-call-row .input { flex: 1; min-width: 0; }
+.test-call-tips { display: grid; gap: 12px; align-content: start; padding: 16px; border-left: 1px solid var(--border); }
+.test-call-tips ul { display: grid; gap: 8px; color: var(--text-2); font-size: 13px; }
+.test-call-tips li { display: flex; align-items: center; gap: 8px; }
+.test-call-tips li .icon { color: var(--green); }
+@media (max-width: 760px) {
+  .test-call { grid-template-columns: 1fr; }
+  .test-call-tips { border-left: 0; border-top: 1px solid var(--border); }
 }

@@ -37,6 +37,10 @@ html { scroll-behavior: smooth; }
 .lp-hero a.lp-btn-primary, .lp-final a.lp-btn-primary { border-color: #fff; background: #fff; color: var(--blue); box-shadow: 0 12px 32px rgba(4, 6, 60, 0.35); }
 .lp-hero a.lp-btn-primary:hover, .lp-final a.lp-btn-primary:hover { background: #eef4ff; }
 .lp-btn-small { min-height: 40px; padding: 0 18px; font-size: 14px; }
+.lp-auth { display: flex; align-items: center; gap: 8px; }
+.lp-btn-quiet { border-color: transparent; }
+.lp a.lp-btn-light { border-color: #fff; background: #fff; color: var(--blue); }
+.lp a.lp-btn-light:hover { background: #eef4ff; }
 
 /* Цэс */
 .lp-nav { position: absolute; z-index: 5; top: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between; gap: 24px; max-width: 1288px; margin: 0 auto; padding: 22px 24px; color: #fff; }
@@ -231,7 +235,11 @@ html { scroll-behavior: smooth; }
   .lp-callback-row { flex-direction: column; padding: 10px; border-radius: 24px; }
   .lp-callback-field { padding-left: 12px; }
   .lp-hero .lp-lead { font-size: 17px; }
-  .lp-btn-small { display: none; }
+  .lp-nav { padding: 18px 16px; gap: 8px; }
+  .lp-brand { white-space: nowrap; }
+  .lp-auth { gap: 0; }
+  .lp-btn-small { min-height: 36px; padding: 0 14px; font-size: 13px; }
+  .lp-btn-quiet { padding: 0 10px; }
   .lp-journey, .lp-bento { grid-template-columns: 1fr; }
   .lp-tile-wide { grid-column: auto; }
   .lp-tile { min-height: 0; }
@@ -250,3 +258,7 @@ html { scroll-behavior: smooth; }
   .lp-btn { transition: none; }
 }
 
+@media (max-width: 400px) {
+  .lp-brand { gap: 6px; font-size: 15px; }
+  .lp-brand img { width: 28px; height: 28px; }
+}

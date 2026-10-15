@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import type { KnowledgeItem } from "../../backend/src/knowledge/store";
 import type { DataSource } from "@/lib/data-source";
@@ -17,10 +18,29 @@ export default function KnowledgePage({ items: initialItems, source }: { items: 
   const [status, setStatus] = useState("");
   const [editor, setEditor] = useState<KnowledgeItem | null | undefined>();
   const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
   const listTitle = useRef<HTMLHeadingElement>(null);
-  // ponytail: засвар зөвхөн жишээ горимд, хуудсан дээр түр хадгалагдана; бодит CRUD API хараахан байхгүй.
-  const editable = source === "demo";
-  const items = editable ? draftItems : initialItems;
+  const router = useRouter();
+  // Жишээ горимд хуудсан дээр түр, бодит горимд серверт (зөвхөн өөрийн бизнесийнх) хадгална.
+  const live = source === "live";
+  const editable = source === "demo" || live;
+  const items = live ? initialItems : draftItems;
+
+  async function persist(request: Promise<Response>, done: string): Promise<boolean> {
+    setSaving(true);
+    try {
+      const response = await request;
+      if (!response.ok) throw new Error(String(response.status));
+      setMessage(done);
+      router.refresh();
+      return true;
+    } catch {
+      setMessage("Хадгалж чадсангүй. Мэдээллээ шалгаад дахин оролдоно уу.");
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
   const search = query.trim().toLowerCase();
   const filtered = items.filter((item) => (!status || item.active === (status === "active")) &&
     (!search || [item.title, item.content].some((value) => value.toLowerCase().includes(search))));
@@ -33,16 +53,20 @@ export default function KnowledgePage({ items: initialItems, source }: { items: 
   return <>
     <PageHeader title="Мэдээллийн сан" subtitle="AI туслах зочдод яг энэ мэдээллээр хариулна.">
       <SourceBadge source={source} />
-      {editable && <button type="button" className="btn btn-primary" disabled={editor !== undefined} onClick={() => { setMessage(""); setEditor(null); }}><Icon name="plus" size={15} />Мэдээлэл нэмэх</button>}
+      {editable && <button type="button" className="btn btn-primary" disabled={editor !== undefined || saving} onClick={() => { setMessage(""); setEditor(null); }}><Icon name="plus" size={15} />Мэдээлэл нэмэх</button>}
     </PageHeader>
     {source === "demo" && <Banner>Жишээ мэдээлэл. Өөрчлөлт энэ хуудсанд түр хадгалагдаж, шинэчлэхэд арилна.</Banner>}
-    {source === "live" && <Banner>Зөвхөн харах горим. Эндээс засварлах боломж хараахан идэвхжээгүй.</Banner>}
     {source === "offline" && <Banner>Backend сервер рүү хүрч чадсангүй. Сервер ажиллаж эхэлмэгц мэдээллийн сан энд харагдана.</Banner>}
 
-    {editable && editor !== undefined && <KnowledgeEditor key={editor?.id ?? "new"} item={editor} onCancel={closeEditor} onSave={(draft) => {
-      const saved: KnowledgeItem = { ...draft, id: editor?.id ?? crypto.randomUUID(), updatedAt: new Date().toISOString() };
-      setItems((current) => [...current.filter((item) => item.id !== saved.id), saved]);
-      setMessage("Жишээ мэдээллийг хадгаллаа.");
+    {editable && editor !== undefined && <KnowledgeEditor key={editor?.id ?? "new"} item={editor} onCancel={closeEditor} onSave={async (draft) => {
+      if (live) {
+        const body = JSON.stringify({ ...draft, ...(editor ? { id: editor.id } : {}) });
+        if (!await persist(fetch("/api/knowledge", { method: "POST", headers: { "Content-Type": "application/json" }, body }), "Мэдээллийг хадгаллаа.")) return;
+      } else {
+        const saved: KnowledgeItem = { ...draft, id: editor?.id ?? crypto.randomUUID(), updatedAt: new Date().toISOString() };
+        setItems((current) => [...current.filter((item) => item.id !== saved.id), saved]);
+        setMessage("Жишээ мэдээллийг хадгаллаа.");
+      }
       reset(); closeEditor();
     }} />}
 
@@ -66,11 +90,16 @@ export default function KnowledgePage({ items: initialItems, source }: { items: 
             </div>
             {item.price !== undefined && <p className="kb-price">{item.price.toLocaleString("en-US")} ₮</p>}
             {editable && <div className="kb-actions">
-              <button className="btn btn-sm" type="button" disabled={editor !== undefined} onClick={() => { setMessage(""); setEditor(item); }}>Засах<span className="sr-only"> {item.title}</span></button>
-              <button className="btn btn-sm btn-danger" type="button" disabled={editor !== undefined} onClick={() => {
-                if (!window.confirm("“" + item.title + "” мэдээллийг жишээ жагсаалтаас устгах уу?")) return;
-                setItems((current) => current.filter((entry) => entry.id !== item.id));
-                setMessage("Жишээ мэдээллийг устгалаа."); listTitle.current?.focus();
+              <button className="btn btn-sm" type="button" disabled={editor !== undefined || saving} onClick={() => { setMessage(""); setEditor(item); }}>Засах<span className="sr-only"> {item.title}</span></button>
+              <button className="btn btn-sm btn-danger" type="button" disabled={editor !== undefined || saving} onClick={async () => {
+                if (!window.confirm("“" + item.title + "” мэдээллийг устгах уу?")) return;
+                if (live) {
+                  await persist(fetch(`/api/knowledge/${encodeURIComponent(item.id)}`, { method: "DELETE" }), "Мэдээллийг устгалаа.");
+                } else {
+                  setItems((current) => current.filter((entry) => entry.id !== item.id));
+                  setMessage("Жишээ мэдээллийг устгалаа.");
+                }
+                listTitle.current?.focus();
               }}>Устгах<span className="sr-only"> {item.title}</span></button>
             </div>}
           </li>)}

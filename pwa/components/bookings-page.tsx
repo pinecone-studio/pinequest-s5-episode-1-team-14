@@ -41,7 +41,7 @@ export default function BookingsPage({ bookings, source, now }: { bookings: Book
             <p className="agenda-time"><time dateTime={booking.startTime}>{formatUlaanbaatarTime(booking.startTime).slice(11)}</time><small>{booking.durationMinutes} мин</small></p>
             <div>
               <p className="agenda-title">{booking.customerName}</p>
-              <p className="agenda-sub">{booking.serviceName} · {booking.phone}</p>
+              <p className="agenda-sub">{booking.serviceName}{partySize(booking) ? ` · ${partySize(booking)} хүн` : ""} · {booking.phone}</p>
             </div>
             {booking === next ? <span className="badge badge-blue">Дараагийнх</span> : <span className="badge badge-green">Баталгаажсан</span>}
           </li>)}
@@ -52,3 +52,6 @@ export default function BookingsPage({ bookings, source, now }: { bookings: Book
     </section>
   </>;
 }
+
+// Хүний тоо (ширээгээр тооцох горимд backend өгнө; хуучин захиалгад байхгүй).
+const partySize = (booking: object) => (booking as { partySize?: number }).partySize;
