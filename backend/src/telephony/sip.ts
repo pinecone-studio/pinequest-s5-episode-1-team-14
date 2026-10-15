@@ -247,6 +247,9 @@ type Call = {
 
 export type SipLine = { dial: (number: string, params?: Record<string, string>) => Promise<boolean> };
 const RING_TIMEOUT_MS = 45_000;
+// Гадагш дуудлагад хариулсны дараа дууны зам нээгдэж, хүн утсаа чихэндээ ойртуулах хугацаа:
+// түүнээс өмнө эхэлсэн мэндчилгээний эхний үгс сонсогдохгүй байсан.
+const OUTBOUND_GREETING_DELAY_MS = 1000;
 
 export async function startSipLine(config: SipConfig): Promise<SipLine> {
   const serverIp = (await lookup(config.server, 4)).address;
@@ -617,7 +620,9 @@ export async function startSipLine(config: SipConfig): Promise<SipLine> {
         return;
       }
       console.log("[sip] гадагш дуудлагад хариулав");
-      startConversation(callId, call, number, params);
+      call.timers.push(setTimeout(() => {
+        if (!call.ended) startConversation(callId, call, number, params);
+      }, OUTBOUND_GREETING_DELAY_MS));
     });
 
     console.log("[sip] гадагш залгаж байна");
