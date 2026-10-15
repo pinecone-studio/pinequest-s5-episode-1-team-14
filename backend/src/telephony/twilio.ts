@@ -8,6 +8,7 @@ import type { WebSocket, RawData } from "ws";
 import { createGeminiLiveSession, type SpeechState } from "../ai/geminiLive.js";
 import { createGeminiTurnSession } from "../ai/geminiTurns.js";
 import { AccountStore, DEFAULT_BUSINESS_ID, voiceIdFor } from "../accounts/store.js";
+import { takeSentences } from "./sentences.js";
 import { greetingFor } from "../ai/callPrompt.js";
 import { speakNumbers, speakPhoneNumbers, speakTimes } from "../voice/spokenNumbers.js";
 import { createTimeStretcher } from "../voice/timeStretch.js";
@@ -323,8 +324,12 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
 
   // Хариултыг бүтнээр нь нэг дор уншуулна: өгүүлбэр бүрийг тусад нь уншвал аялга тасарч,
   // нэг хэвийн сонсогддог. Эхний дуу ~0.25с хоцорно (Gemini хариултаа дуусгах хугацаа).
+  // Бүтэн өгүүлбэр бэлэн болмогц уншиж эхэлнэ: урт хариултыг бүтнээр нь хүлээхэд ~0.5-1с алддаг.
+  // Зөвхөн өгүүлбэрийн төгсгөлд (. ? !) хуваана — таслал дээр хуваавал аялга тасарна.
   function onText(delta: string): void {
-    pendingText += delta;
+    const { sentences, rest } = takeSentences(pendingText + delta);
+    sentences.forEach((sentence) => enqueueSpeak(sentence));
+    pendingText = rest;
   }
 
   function onHold(text: string): void {
