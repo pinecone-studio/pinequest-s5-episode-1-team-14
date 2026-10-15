@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Geologica } from "next/font/google";
 import Image from "next/image";
 import Link from "next/link";
 import { CallbackForm } from "@/components/callback-form";
@@ -10,8 +9,6 @@ export const metadata: Metadata = {
   title: "CallAI — нэг ч дуудлага алдахгүй AI хүлээн авагч",
   description: "Завгүй үед ч, ажлын цаг дууссан ч AI хүлээн авагч таны бизнесийн утсанд хариулж, асуултад хариулан, цагийг шууд захиална.",
 };
-
-const display = Geologica({ subsets: ["latin", "cyrillic"], variable: "--lp-font", display: "swap" });
 
 // Туршилтын дугаарыг кодод бичихгүй — байршуулах үед NEXT_PUBLIC_DEMO_NUMBER-ээр өгнө.
 const DEMO_NUMBER = process.env.NEXT_PUBLIC_DEMO_NUMBER?.trim() ?? "";
@@ -73,7 +70,7 @@ function PrimaryCta() {
 }
 
 function Heading({ kicker, title, lead, id }: { kicker: string; title: React.ReactNode; lead?: string; id: string }) {
-  return <div className="lp-heading"><p className="lp-kicker">{kicker}</p><h2 id={id}>{title}</h2>{lead && <p className="lp-lead">{lead}</p>}</div>;
+  return <div className="lp-heading"><p className="lp-kicker">{kicker}</p><div className="lp-heading-row"><h2 id={id}>{title}</h2>{lead && <p className="lp-lead">{lead}</p>}</div></div>;
 }
 
 function Photo({ name, alt, sizes, priority }: { name: string; alt: string; sizes: string; priority?: boolean }) {
@@ -81,7 +78,7 @@ function Photo({ name, alt, sizes, priority }: { name: string; alt: string; size
 }
 
 export default function LandingPage() {
-  return <div className={"lp " + display.variable}>
+  return <div className="lp">
     <header className="lp-nav">
       <Brand />
       <nav aria-label="Үндсэн цэс">
@@ -98,20 +95,27 @@ export default function LandingPage() {
 
     <main>
       <section className="lp-hero">
-        <div className="lp-mascot" aria-hidden="true">
-          <span /><span /><span />
-          <Image src="/logo-mark.png" alt="" width={104} height={104} priority />
+        <div className="lp-hero-layout">
+          <div className="lp-hero-copy">
+            <h1>Нэг ч дуудлага<br /><em>алдахгүй</em></h1>
+            <p className="lp-lead">Завгүй үед ч, ажлын цаг дууссан ч AI хүлээн авагч таны бизнесийн утсанд хариулж, асуултад хариулан, цагийг шууд захиална.</p>
+            <div className="lp-actions">
+              <Link className="lp-btn" href="/dashboard">Хянах самбар үзэх<Icon name="arrow" /></Link>
+              <a className="lp-btn" href="#call">Хэрхэн ажилладаг вэ</a>
+            </div>
+            <ul className="lp-facts">
+              <li>Өдөр шөнөгүй</li><li>Таны өөрийн дуу хоолойгоор</li><li>Google Calendar-тай</li>
+            </ul>
+          </div>
+          <div className="lp-hero-demo">
+            <div className="lp-mascot" aria-hidden="true">
+              <span /><span /><span />
+              <Image src="/logo-mark.png" alt="" width={80} height={80} priority />
+            </div>
+            <h2>AI хүлээн авагчтай<br />ярьж үзээрэй</h2>
+            <CallbackForm />
+          </div>
         </div>
-        <h1>Нэг ч дуудлага<br /><em>алдахгүй</em></h1>
-        <p className="lp-lead">Завгүй үед ч, ажлын цаг дууссан ч AI хүлээн авагч таны бизнесийн утсанд хариулж, асуултад хариулан, цагийг шууд захиална.</p>
-        <CallbackForm />
-        <div className="lp-actions">
-          <Link className="lp-btn" href="/dashboard">Хянах самбар үзэх<Icon name="arrow" /></Link>
-          <a className="lp-btn" href="#call">Хэрхэн ажилладаг вэ</a>
-        </div>
-        <ul className="lp-facts">
-          <li>Өдөр шөнөгүй</li><li>Таны өөрийн дуу хоолойгоор</li><li>Google Calendar-тай</li>
-        </ul>
         <ul className="lp-strip" aria-label="Хэнд тохирох вэ">
           {SECTORS.map((sector, index) => <li key={sector.label}>
             <Photo name={sector.photo} alt={sector.alt} sizes="(max-width: 640px) 62vw, 240px" priority={index < 3} />
@@ -125,7 +129,7 @@ export default function LandingPage() {
         <Heading id="options-title" kicker="Асуудал" title={<>Утас дуугарахад танд<br />гурван сонголт байдаг</>} lead="Гурвуулаа ямар нэг зүйлээ золиослодог." />
         <div className="lp-problem">
           <figure className="lp-photo">
-            <Photo name="owner" alt="Ширээндээ ажиллангаа утсаар ярьж буй эмэгтэй" sizes="(max-width: 940px) 100vw, 460px" />
+            <Photo name="owner" alt="Ширээндээ ажиллангаа утсаар ярьж буй эмэгтэй" sizes="(max-width: 940px) 100vw, 500px" />
             <figcaption className="lp-chip"><Icon name="phone" size={14} />Ажлын дундуур утас дуугарна</figcaption>
           </figure>
           <div className="lp-options">
@@ -145,7 +149,7 @@ export default function LandingPage() {
             <ul>{GAINS.map((gain) => <li key={gain}><Icon name="check" size={16} />{gain}</li>)}</ul>
           </div>
           <figure className="lp-photo">
-            <Photo name="caller" alt="Цонхны дэргэд утсаар ярьж буй харилцагч" sizes="(max-width: 940px) 100vw, 420px" />
+            <Photo name="caller" alt="Цонхны дэргэд утсаар ярьж буй харилцагч" sizes="(max-width: 640px) 100vw, 380px" />
             <figcaption className="lp-chip"><span className="lp-dot" aria-hidden="true" />Харилцагч хүлээхгүй</figcaption>
           </figure>
         </article>
@@ -155,20 +159,20 @@ export default function LandingPage() {
         <Heading id="call-title" kicker="Хэрхэн ажилладаг" title={<>Нэг дуудлага <em>эхнээсээ дуустал</em></>} lead="Харилцагч таны дугаар руу залгах мөчөөс хянах самбарт бүртгэгдэх хүртэл." />
         <ol className="lp-journey">
           <li className="is-blue">
-            <div className="lp-media"><Photo name="caller2" alt="Утсандаа инээмсэглэн ярьж буй харилцагч" sizes="(max-width: 940px) 100vw, 280px" /><span className="lp-ring" aria-hidden="true"><Icon name="phone" size={18} /></span></div>
-            <span className="lp-count">1</span><h3>{JOURNEY[0].title}</h3><p>{JOURNEY[0].text}</p>
+            <div className="lp-media"><Photo name="caller2" alt="Утсандаа инээмсэглэн ярьж буй харилцагч" sizes="(max-width: 640px) 100vw, 220px" /><span className="lp-ring" aria-hidden="true"><Icon name="phone" size={18} /></span></div>
+            <div className="lp-journey-copy"><span className="lp-count">01</span><h3>{JOURNEY[0].title}</h3><p>{JOURNEY[0].text}</p></div>
           </li>
           <li>
             <div className="lp-media lp-topics" aria-hidden="true">{TOPICS.map((topic) => <span key={topic}><Icon name="tag" size={13} />{topic}</span>)}</div>
-            <span className="lp-count">2</span><h3>{JOURNEY[1].title}</h3><p>{JOURNEY[1].text}</p>
+            <div className="lp-journey-copy"><span className="lp-count">02</span><h3>{JOURNEY[1].title}</h3><p>{JOURNEY[1].text}</p></div>
           </li>
           <li className="is-blue">
             <div className="lp-media lp-slots" aria-hidden="true"><span>Завгүй</span><span className="is-free"><Icon name="check" size={15} />Сул цаг</span><span>Завгүй</span></div>
-            <span className="lp-count">3</span><h3>{JOURNEY[2].title}</h3><p>{JOURNEY[2].text}</p>
+            <div className="lp-journey-copy"><span className="lp-count">03</span><h3>{JOURNEY[2].title}</h3><p>{JOURNEY[2].text}</p></div>
           </li>
           <li>
-            <div className="lp-media lp-shot"><Image src="/landing/calls.png" alt="Хянах самбарын дуудлагын жагсаалт" fill sizes="(max-width: 940px) 100vw, 280px" /></div>
-            <span className="lp-count">4</span><h3>{JOURNEY[3].title}</h3><p>{JOURNEY[3].text}</p>
+            <div className="lp-media lp-shot"><Image src="/landing/calls.png" alt="Хянах самбарын дуудлагын жагсаалт" fill sizes="(max-width: 640px) 100vw, 220px" /></div>
+            <div className="lp-journey-copy"><span className="lp-count">04</span><h3>{JOURNEY[3].title}</h3><p>{JOURNEY[3].text}</p></div>
           </li>
         </ol>
       </section>
@@ -216,10 +220,12 @@ export default function LandingPage() {
       </section>
 
       <section className="lp-section is-tint" id="start" aria-labelledby="start-title">
-        <Heading id="start-title" kicker="Эхлэх" title={<>Гурван алхам.<br />Дугаар тань хэвээрээ.</>} />
-        <ol className="lp-steps">
-          {STEPS.map((step, index) => <li key={step.title}><span className="lp-step-number" aria-hidden="true">{index + 1}</span><h3>{step.title}</h3><p>{step.text}</p></li>)}
-        </ol>
+        <div className="lp-start-layout">
+          <Heading id="start-title" kicker="Эхлэх" title={<>Гурван алхам.<br />Дугаар тань хэвээрээ.</>} />
+          <ol className="lp-steps">
+            {STEPS.map((step, index) => <li key={step.title}><span className="lp-step-number" aria-hidden="true">0{index + 1}</span><div><h3>{step.title}</h3><p>{step.text}</p></div></li>)}
+          </ol>
+        </div>
       </section>
 
       <section className="lp-section lp-faq-section" id="faq" aria-labelledby="faq-title">
@@ -229,11 +235,15 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section className="lp-final">
-        <Image src="/logo-mark.png" alt="" width={72} height={72} />
-        <h2>{DEMO_NUMBER ? <>Өөрөө <em>залгаад</em> үзээрэй</> : <>Хянах самбарыг <em>үзээрэй</em></>}</h2>
-        <p className="lp-lead">{DEMO_NUMBER ? "Цаг захиалж, үнэ асууж, яриаг нь тасалж үзээрэй." : "Дуудлага, захиалга, ярианы бичвэр нэг дор."}</p>
-        <PrimaryCta />
+      <section className="lp-final" aria-labelledby="final-title">
+        <div className="lp-final-inner">
+          <Image src="/logo-mark.png" alt="" width={72} height={72} />
+          <div className="lp-final-copy">
+            <h2 id="final-title">{DEMO_NUMBER ? <>Өөрөө <em>залгаад</em> үзээрэй</> : <>Хянах самбарыг <em>үзээрэй</em></>}</h2>
+            <p className="lp-lead">{DEMO_NUMBER ? "Цаг захиалж, үнэ асууж, яриаг нь тасалж үзээрэй." : "Дуудлага, захиалга, ярианы бичвэр нэг дор."}</p>
+          </div>
+          <PrimaryCta />
+        </div>
       </section>
     </main>
 
