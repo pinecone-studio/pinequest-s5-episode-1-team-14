@@ -7,7 +7,9 @@
 
 import { GoogleGenAI, Modality, Type, type Tool } from "@google/genai";
 import { BusinessKnowledgeStore } from "../knowledge/store.js";
-import { checkAvailability, createAppointment } from "../calendar/googleCalendar.js";
+import { belongsTo, DEFAULT_BUSINESS_ID } from "../accounts/store.js";
+import { cancelAppointment, checkAvailability, createAppointment, upcomingBookingsFor } from "../calendar/googleCalendar.js";
+import { localIso } from "../telephony/reminder.js";
 import { buildSystemInstruction } from "./callPrompt.js";
 import { randomUUID } from "node:crypto";
 
@@ -26,8 +28,9 @@ export const TOOLS: Tool[] = [
             startTime: { type: Type.STRING, description: "HH:mm" },
             endTime: { type: Type.STRING, description: "HH:mm" },
             durationMinutes: { type: Type.NUMBER },
+            partySize: { type: Type.NUMBER, description: "Хүний тоо" },
           },
-          required: ["date", "startTime", "endTime", "durationMinutes"],
+          required: ["date", "startTime", "endTime", "durationMinutes", "partySize"],
         },
       },
       {
@@ -42,15 +45,44 @@ export const TOOLS: Tool[] = [
             serviceName: { type: Type.STRING },
             startTime: { type: Type.STRING, description: "ISO 8601, жишээ 2026-10-11T19:00:00+08:00" },
             durationMinutes: { type: Type.NUMBER },
+            partySize: { type: Type.NUMBER, description: "Хүний тоо" },
           },
-          required: ["customerName", "phone", "serviceId", "serviceName", "startTime", "durationMinutes"],
+          required: ["customerName", "phone", "serviceId", "serviceName", "startTime", "durationMinutes", "partySize"],
         },
+      },
+      {
+        name: "cancel_appointment",
+        description: "Энэ дуудлагын дугаар дээрх захиалгыг цуцлах — зочин цуцлахыг баталгаажуулсны дараа л дуудна.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            startTime: { type: Type.STRING, description: "Захиалгын эхлэх цаг, ISO 8601, жишээ 2026-10-14T20:30:00+08:00" },
+          },
+          required: ["startTime"],
+        },
+      },
+      {
+        name: "find_my_bookings",
+        description: "Энэ дуудлагын дугаар дээрх ирээдүйн захиалгуудыг харах — зочин захиалгаа шалгуулах, баталгаажсан эсэхийг асуухад.",
+        parameters: { type: Type.OBJECT, properties: {} },
+      },
+      {
+        name: "request_human",
+        description: "Зочин ажилтан, хүнтэй ярих хүсэлтийг бүртгэх — ажилтан эргэн холбогдоно.",
+        parameters: { type: Type.OBJECT, properties: { reason: { type: Type.STRING, description: "Юуны талаар ярих хүсэлтэй" } } },
       },
     ],
   },
 ];
 
-export async function runTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+const CALENDAR_TOOLS = { check_availability: true, create_appointment: true, cancel_appointment: true, find_my_bookings: true };
+
+// context.callerPhone: зөвхөн энэ дугаарын захиалгыг цуцлах боломжтой.
+export async function runTool(name: string, args: Record<string, unknown>, context: { callerPhone?: string | null; businessId?: string } = {}): Promise<unknown> {
+  // ponytail: захиалгын календарь одоогоор зөвхөн үндсэн бизнест; бусад бизнест өөрийн календарь холбох хэрэгтэй.
+  if (context.businessId && context.businessId !== DEFAULT_BUSINESS_ID && name in CALENDAR_TOOLS) {
+    return { error: "Энэ бизнест захиалгын календарь холбогдоогүй. Зочны нэр, утсыг тэмдэглээд ажилтан эргэн холбогдоно гэж хэл." };
+  }
   try {
     switch (name) {
       case "check_availability":
@@ -58,6 +90,7 @@ export async function runTool(name: string, args: Record<string, unknown>): Prom
           date: String(args.date),
           timeRange: { start: String(args.startTime), end: String(args.endTime) },
           durationMinutes: Number(args.durationMinutes),
+          partySize: Number(args.partySize) || undefined,
         });
       case "create_appointment":
         return await createAppointment({
@@ -68,7 +101,28 @@ export async function runTool(name: string, args: Record<string, unknown>): Prom
           serviceName: String(args.serviceName),
           startTime: String(args.startTime),
           durationMinutes: Number(args.durationMinutes),
+          partySize: Number(args.partySize) || undefined,
         });
+      case "cancel_appointment":
+        if (!context.callerPhone) return { error: "Залгагчийн дугаар тодорхойгүй тул цуцлах боломжгүй; ажилтан холбогдоно гэж хэл." };
+        try {
+          return await cancelAppointment({ phone: context.callerPhone, startTime: String(args.startTime) });
+        } catch (error) {
+          // Олдохгүй бол энэ дугаарын захиалгуудыг өгнө: загвар зочноос аль нь болохыг тодруулна.
+          const own = await upcomingBookingsFor(context.callerPhone).catch(() => []);
+          return {
+            error: error instanceof Error ? error.message : "Цуцалж чадсангүй",
+            callerBookings: own.map((booking) => ({ startTime: localIso(booking.startTime), customerName: booking.customerName })),
+          };
+        }
+      case "find_my_bookings": {
+        if (!context.callerPhone) return { error: "Залгагчийн дугаар тодорхойгүй тул захиалга хайх боломжгүй." };
+        const own = await upcomingBookingsFor(context.callerPhone);
+        return { bookings: own.map((booking) => ({ startTime: localIso(booking.startTime), customerName: booking.customerName, serviceName: booking.serviceName, partySize: booking.partySize })) };
+      }
+      case "request_human":
+        // Dashboard-д "ажилтантай холбогдох" гэж тэмдэглэгдэнэ (onToolResult).
+        return { recorded: true };
       default:
         return { error: `Үл мэдэгдэх function: ${name}` };
     }
@@ -90,6 +144,10 @@ export type GeminiLiveCallbacks = {
   // Дуудагч AI-г таслан орж ярихад Gemini-ийн дотоод VAD илрүүлээд дуудна —
   // тоглуулж буй/дараалалд буй хариултыг шууд зогсоох дохио.
   onInterrupted?: () => void;
+  // Зочны яриа танигдмагц (хариултаас өмнө) богино үг хэлэх.
+  onAck?: () => void;
+  // Календарь шалгах мэт удаан үйлдлийн өмнө хэлэх богино үг ("Нэг хором.").
+  onHold?: (text: string) => void;
   // Function бүр ажилласны дараа — дуудлагыг захиалга, зорилготой нь холбоход.
   onToolResult?: (name: string, result: unknown) => void;
   onError?: (message: string) => void;
@@ -98,16 +156,20 @@ export type GeminiLiveCallbacks = {
 
 export async function createGeminiLiveSession(
   callbacks: GeminiLiveCallbacks,
-  context: { callerPhone?: string | null; greeted?: boolean } = {},
+  context: { callerPhone?: string | null; greeted?: boolean; greeting?: string; extra?: string; businessId?: string; businessName?: string } = {},
 ) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY тохируулаагүй байна");
 
   const ai = new GoogleGenAI({ apiKey });
   const systemInstruction = buildSystemInstruction({
-    knowledge: new BusinessKnowledgeStore().list({ activeOnly: true }),
+    // Зөвхөн энэ дуудлагын бизнесийн мэдээлэл.
+    knowledge: new BusinessKnowledgeStore().list({ activeOnly: true }).filter(belongsTo(context.businessId ?? DEFAULT_BUSINESS_ID)),
     callerPhone: context.callerPhone,
     greeted: context.greeted,
+    greeting: context.greeting,
+    extra: context.extra,
+    businessName: context.businessName,
   });
 
   const session = await ai.live.connect({
@@ -140,7 +202,7 @@ export async function createGeminiLiveSession(
         if (message.toolCall?.functionCalls) {
           const functionResponses = [];
           for (const call of message.toolCall.functionCalls) {
-            const result = await runTool(call.name ?? "", (call.args ?? {}) as Record<string, unknown>);
+            const result = await runTool(call.name ?? "", (call.args ?? {}) as Record<string, unknown>, { callerPhone: context.callerPhone, businessId: context.businessId });
             callbacks.onToolResult?.(call.name ?? "", result);
             functionResponses.push({ name: call.name, id: call.id, response: { result } });
           }

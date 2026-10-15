@@ -97,3 +97,16 @@ test("call lifecycle survives reopening, handles callback retries and preserves 
   assert.deepEqual(readdirSync(dirname(file)), ["calls.json"], "failed writes clean temporary files");
   assert.throws(() => new CallSessionStore(directory).list(), "read errors propagate");
 });
+
+test("closeActive finishes calls left active by a restart", (context) => {
+  const dir = mkdtempSync(join(tmpdir(), "calls-"));
+  context.after(() => rmSync(dir, { recursive: true, force: true }));
+  const store = new CallSessionStore(join(dir, "calls.json"));
+  store.start({ id: "a", callerPhone: null, startedAt: "2026-10-14T09:30:00.000Z" });
+  store.start({ id: "b", callerPhone: null, startedAt: "2026-10-14T09:31:00.000Z" });
+  store.finish("b", { status: "completed", endedAt: "2026-10-14T09:32:00.000Z" });
+  assert.equal(store.closeActive("2026-10-14T09:36:04.000Z"), 1);
+  assert.equal(store.get("a")?.status, "failed");
+  assert.equal(store.get("a")?.duration, 364);
+  assert.equal(store.get("b")?.status, "completed");
+});

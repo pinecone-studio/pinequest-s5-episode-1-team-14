@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { decodeMuLaw } from "./twilio.js";
-import { aLawToMuLaw, buildRtpPacket, muLawToALaw, digestAuthorization, PacedAudio, parseChallenge, parseRtpPacket, parseSdpAudio, parseSipMessage, parseStunMappedAddress } from "./sip.js";
+import { aLawToMuLaw, buildRtpPacket, rtpOrder, muLawToALaw, digestAuthorization, PacedAudio, parseChallenge, parseRtpPacket, parseSdpAudio, parseSipMessage, parseStunMappedAddress } from "./sip.js";
 
 test("SIP messages are parsed, including compact header names", () => {
   const message = parseSipMessage("INVITE sip:75000000@1.2.3.4 SIP/2.0\r\nv: SIP/2.0/UDP 9.9.9.9\r\nFrom: <sip:99112233@host>;tag=a\r\ni: abc\r\nCSeq: 1 INVITE\r\n\r\nv=0\r\n");
@@ -81,4 +81,15 @@ test("A-law and mu-law convert both ways without changing the sound", () => {
   before.forEach((sample, index) => {
     assert.ok(Math.abs(after[index] - sample) <= Math.max(32, Math.abs(sample) * 0.07), `${sample} -> ${after[index]}`);
   });
+});
+
+test("RTP ordering drops duplicates and slightly late packets but accepts a restarted stream", () => {
+  assert.equal(rtpOrder(100, 101), "next");
+  assert.equal(rtpOrder(100, 105), "next");
+  assert.equal(rtpOrder(65535, 0), "next");
+  assert.equal(rtpOrder(100, 100), "duplicate");
+  assert.equal(rtpOrder(100, 98), "late");
+  // Оператор урсгалыг шинэ дугаараас эхлүүлсэн: өмнө нь бүгдийг хаяж байсан.
+  assert.equal(rtpOrder(30000, 1200), "restart");
+  assert.equal(rtpOrder(1200, 40000), "restart");
 });

@@ -14,6 +14,8 @@ export type KnowledgeItem = {
   price?: number;
   active: boolean;
   updatedAt: string;
+  // Аль бизнесийнх. Байхгүй бол үндсэн (анхны) бизнесийнх.
+  businessId?: string;
 };
 
 function validateItem(value: unknown): asserts value is KnowledgeItem {
@@ -21,7 +23,7 @@ function validateItem(value: unknown): asserts value is KnowledgeItem {
     throw new TypeError("Knowledge item must be an object");
   }
   const item = value as Record<string, unknown>;
-  const fields = ["id", "category", "title", "content", "price", "active", "updatedAt"];
+  const fields = ["id", "category", "title", "content", "price", "active", "updatedAt", "businessId"];
   if (Object.keys(item).some((key) => !fields.includes(key))) {
     throw new TypeError("Unknown knowledge item field");
   }
@@ -32,6 +34,9 @@ function validateItem(value: unknown): asserts value is KnowledgeItem {
   }
   if (!KNOWLEDGE_CATEGORIES.some((category) => category === item.category)) {
     throw new TypeError("Invalid knowledge category");
+  }
+  if (item.businessId !== undefined && (typeof item.businessId !== "string" || !item.businessId.trim())) {
+    throw new TypeError("businessId must be a non-empty string");
   }
   if (typeof item.active !== "boolean") {
     throw new TypeError("active must be a boolean");
