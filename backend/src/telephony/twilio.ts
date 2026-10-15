@@ -17,6 +17,7 @@ import { CallSessionStore } from "../calls/store.js";
 import { inferIntent } from "../calls/intent.js";
 import { createTranscriptRecorder, TranscriptStore } from "../calls/transcript.js";
 import { consumeStreamToken } from "./streamTokens.js";
+import type { SipSocket } from "./sip.js";
 import type { Booking } from "../calendar/googleCalendar.js";
 
 // AI-ийн ярианы хурд (1 = ElevenLabs-ийн анхдагч). Утсанд 1.15 хурдан ч ойлгомжтой.
@@ -42,6 +43,17 @@ const ECHO_TAIL_MS = 500;
 const HANGUP_GRACE_MS = 800;
 // Тоглуулалт ямар нэг шалтгаанаар дуусахгүй бол үүнээс удаан хүлээхгүй.
 const HANGUP_MAX_WAIT_MS = 20_000;
+// Ажилтан руу шилжүүлэхийн өмнө AI-ийн "холбож байна" гэх үг дуусахыг хүлээх дээд хугацаа.
+const TRANSFER_SPEECH_WAIT_MS = 8000;
+// STAFF_HOURS="10-22" (Улаанбаатарын цаг): энэ цагаас гадуур шилжүүлэхгүй, хүсэлтийг бүртгэнэ.
+const staffHour = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Ulaanbaatar", hour: "2-digit", hourCycle: "h23" });
+export function staffAvailable(env: NodeJS.ProcessEnv = process.env, now = new Date()): boolean {
+  if (!env.STAFF_PHONE?.replace(/\D/g, "")) return false;
+  const [from, to] = (env.STAFF_HOURS ?? "").split("-").map(Number);
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from >= to) return true;
+  const hour = Number(staffHour.format(now));
+  return hour >= from && hour < to;
+}
 // Мэндчилгээг дуустал хамгаална; тоглуулж чадаагүй тохиолдолд үүнээс урт хүлээхгүй.
 const GREETING_GUARD_MS = 15_000;
 
@@ -200,6 +212,27 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
         scheduleHangup();
       }
     }, idle || overdue ? HANGUP_GRACE_MS : 200);
+  }
+  // Зочныг ажилтан руу шилжүүлнэ (SIP шугамаар ирсэн дуудлагад). AI-ийн хэлж буй үгийг дуусгаад холбоно.
+  async function onTransfer(): Promise<unknown> {
+    const sip = ws as unknown as SipSocket;
+    if (!sip.transfer || !staffAvailable()) {
+      return { transferred: false, reason: "No staff can take the call now." };
+    }
+    if (pendingText.trim()) enqueueSpeak(pendingText);
+    pendingText = "";
+    for (let waited = 0; waited < TRANSFER_SPEECH_WAIT_MS && (queuedSpeech > 0 || streaming || marksPending > 0); waited += 100) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (closed) return { transferred: false, reason: "The call has ended." };
+    try {
+      store.update(callId, { intent: "REQUEST_HUMAN" });
+    } catch (error) {
+      console.error("[twilio] шилжүүлэлтийг бүртгэж чадсангүй:", error);
+    }
+    const transferred = await sip.transfer(String(process.env.STAFF_PHONE).replace(/\D/g, ""));
+    console.log(`[twilio] ажилтан руу шилжүүлэх: ${transferred ? "холбогдлоо" : "ажилтан авсангүй"}`);
+    return transferred ? { transferred: true } : { transferred: false, reason: "Staff did not answer." };
   }
   function cancelHangup(): void {
     hangupRequested = false;
@@ -425,6 +458,7 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
           },
           onInterrupted,
           speechState,
+          onTransfer,
           onAck,
           onHold,
           onToolResult,

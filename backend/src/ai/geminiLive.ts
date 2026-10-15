@@ -72,6 +72,11 @@ export const TOOLS: Tool[] = [
         parameters: { type: Type.OBJECT, properties: { reason: { type: Type.STRING, description: "Юуны талаар ярих хүсэлтэй" } } },
       },
       {
+        name: "transfer_to_staff",
+        description: "Connect the caller to a staff member by phone, when they ask to speak to a person. Tell the caller you are connecting them before calling it. If it returns transferred: false, nobody could take the call: record the request with request_human and say staff will call back.",
+        parameters: { type: Type.OBJECT, properties: {} },
+      },
+      {
         name: "end_call",
         description: "Hang up the phone call. Use it in the same reply as your goodbye, once the caller has said they need nothing else. The line closes after your goodbye has finished playing; if the caller speaks again, the call continues.",
         parameters: { type: Type.OBJECT, properties: {} },
@@ -83,7 +88,8 @@ export const TOOLS: Tool[] = [
 const CALENDAR_TOOLS = { check_availability: true, create_appointment: true, cancel_appointment: true, find_my_bookings: true };
 
 // context.callerPhone: зөвхөн энэ дугаарын захиалгыг цуцлах боломжтой.
-export async function runTool(name: string, args: Record<string, unknown>, context: { callerPhone?: string | null; businessId?: string } = {}): Promise<unknown> {
+// context.transfer: дуудлагыг ажилтан руу шилжүүлэх (SIP шугамаар ирсэн дуудлагад л).
+export async function runTool(name: string, args: Record<string, unknown>, context: { callerPhone?: string | null; businessId?: string; transfer?: () => Promise<unknown> } = {}): Promise<unknown> {
   // ponytail: захиалгын календарь одоогоор зөвхөн үндсэн бизнест; бусад бизнест өөрийн календарь холбох хэрэгтэй.
   if (context.businessId && context.businessId !== DEFAULT_BUSINESS_ID && name in CALENDAR_TOOLS) {
     return { error: "Энэ бизнест захиалгын календарь холбогдоогүй. Зочны нэр, утсыг тэмдэглээд ажилтан эргэн холбогдоно гэж хэл." };
@@ -128,6 +134,8 @@ export async function runTool(name: string, args: Record<string, unknown>, conte
       case "request_human":
         // Dashboard-д "ажилтантай холбогдох" гэж тэмдэглэгдэнэ (onToolResult).
         return { recorded: true };
+      case "transfer_to_staff":
+        return context.transfer ? await context.transfer() : { transferred: false, reason: "Transfer is not available on this call." };
       case "end_call":
         // Утсыг дуудлагын хэсэг баяртай гэсэн үг тоглож дууссаны дараа тавина (onToolResult).
         return { ending: true };
@@ -163,6 +171,8 @@ export type GeminiLiveCallbacks = {
   onHold?: (text: string) => void;
   // Function бүр ажилласны дараа — дуудлагыг захиалга, зорилготой нь холбоход.
   onToolResult?: (name: string, result: unknown) => void;
+  // Зочныг ажилтан руу шилжүүлнэ; { transferred: boolean } буцаана.
+  onTransfer?: () => Promise<unknown>;
   onError?: (message: string) => void;
   onClose?: (reason: string) => void;
 };
@@ -216,7 +226,7 @@ export async function createGeminiLiveSession(
         if (message.toolCall?.functionCalls) {
           const functionResponses = [];
           for (const call of message.toolCall.functionCalls) {
-            const result = await runTool(call.name ?? "", (call.args ?? {}) as Record<string, unknown>, { callerPhone: context.callerPhone, businessId: context.businessId });
+            const result = await runTool(call.name ?? "", (call.args ?? {}) as Record<string, unknown>, { callerPhone: context.callerPhone, businessId: context.businessId, transfer: callbacks.onTransfer });
             callbacks.onToolResult?.(call.name ?? "", result);
             functionResponses.push({ name: call.name, id: call.id, response: { result } });
           }

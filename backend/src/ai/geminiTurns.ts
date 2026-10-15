@@ -381,7 +381,7 @@ export async function createGeminiTurnSession(
       }
       const responses: Part[] = [];
       for (const call of calls) {
-        const result = await runTool(call.name ?? "", (call.args ?? {}) as Record<string, unknown>, { callerPhone: context.callerPhone, businessId: context.businessId });
+        const result = await runTool(call.name ?? "", (call.args ?? {}) as Record<string, unknown>, { callerPhone: context.callerPhone, businessId: context.businessId, transfer: callbacks.onTransfer });
         callbacks.onToolResult?.(call.name ?? "", result);
         responses.push({ functionResponse: { name: call.name, id: call.id, response: { result: toUlaanbaatarTimes(result) } } });
       }

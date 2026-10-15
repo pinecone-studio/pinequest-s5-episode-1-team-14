@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createDownsampler24kTo8k, decodeMuLaw, encodeMuLaw, resolveCallerPhone } from "./twilio.js";
+import { createDownsampler24kTo8k, decodeMuLaw, encodeMuLaw, resolveCallerPhone, staffAvailable } from "./twilio.js";
+import { runTool } from "../ai/geminiLive.js";
 
 function pcm(samples: number[]): Buffer {
   const buffer = Buffer.alloc(samples.length * 2);
@@ -37,4 +38,18 @@ test("caller phone is kept for real callers and dropped when forwarding hides it
   assert.equal(phone({ To: "+15005550006" }), "");
   // Буцааж залгасан дуудлага.
   assert.equal(phone({ From: "+15005550006", To: "+97699112233", Direction: "outbound-api" }), "+97699112233");
+});
+
+test("calls are transferred only when a staff number is set and within staff hours", () => {
+  const noon = new Date("2026-10-20T12:00:00+08:00");
+  const night = new Date("2026-10-20T23:30:00+08:00");
+  assert.equal(staffAvailable({}, noon), false);
+  assert.equal(staffAvailable({ STAFF_PHONE: "99112233" }, night), true);
+  assert.equal(staffAvailable({ STAFF_PHONE: "99112233", STAFF_HOURS: "10-22" }, noon), true);
+  assert.equal(staffAvailable({ STAFF_PHONE: "99112233", STAFF_HOURS: "10-22" }, night), false);
+});
+
+test("the transfer tool reports when no transfer is possible and otherwise hands over", async () => {
+  assert.deepEqual(await runTool("transfer_to_staff", {}), { transferred: false, reason: "Transfer is not available on this call." });
+  assert.deepEqual(await runTool("transfer_to_staff", {}, { transfer: async () => ({ transferred: true }) }), { transferred: true });
 });
