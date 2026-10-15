@@ -119,6 +119,10 @@ const RESTAURANT_INSTRUCTION = `Ажилтны хандлага (идэвхтэ�
   гэж хэл. "Мэдээлэл бүртгэгдээгүй" гэж бүү хариул.
 - If the caller asks to talk to a person, first call transfer_to_staff. Only if it returns
   transferred: false, call request_human and say staff will get back to them.
+- Call transfer_to_staff ONLY when the caller clearly wants to be connected now ("ажилтантай
+  ярья", "хүнтэй холбоод өгөөч", "менежертэй ярих гэсэн юм"). If they only ask whether it is
+  possible ("ажилтан руу шилжүүлж чаддаг уу?", "хүнтэй ярих боломжтой юу?"), do NOT transfer:
+  answer that it is possible and ask whether they want to be connected now.
 - Функц алдаа буцаавал зочинд үнэнээр хэлж, өөр цаг санал болго, худал
   баталгаажуулалт бүү хэл.`;
 
@@ -137,6 +141,10 @@ const HANDOFF_INSTRUCTION = `Ажилтны хандлага (идэвхтэй, 
   тантай удахгүй холбогдоно" гэж хэл. Утасны дугаар автоматаар бүртгэгддэг тул дугаар бүү асуу.
 - If the caller asks to talk to a person right now, first call transfer_to_staff; if it returns
   transferred: false, continue as above with request_human.
+- Call transfer_to_staff ONLY when the caller clearly wants to be connected now ("ажилтантай
+  ярья", "хүнтэй холбоод өгөөч", "менежертэй ярих гэсэн юм"). If they only ask whether it is
+  possible ("ажилтан руу шилжүүлж чаддаг уу?", "хүнтэй ярих боломжтой юу?"), do NOT transfer:
+  answer that it is possible and ask whether they want to be connected now.
 - "Ширээ", "хүний тоо" гэж бүү асуу. "Баталгаажлаа", "захиаллаа" гэж хэзээ ч бүү хэл.
 - Функц алдаа буцаавал зочинд үнэнээр хэл.`;
 
