@@ -15,7 +15,7 @@
     "test:call-flow": "tsx --test src/ai/callPrompt.test.ts src/ai/geminiTurns.test.ts src/ai/chimege.test.ts src/telephony/sentences.test.ts src/telephony/twilio.test.ts",
     "test:accounts": "tsx --test src/accounts/store.test.ts src/telephony/lines.test.ts",
     "line:add": "tsx src/telephony/addLine.ts",
-    "test:telephony": "tsx --test src/telephony/twilioSignature.test.ts src/telephony/streamTokens.test.ts src/telephony/callback.test.ts src/telephony/sip.test.ts src/telephony/reminder.test.ts src/voice/spokenNumbers.test.ts src/voice/timeStretch.test.ts src/ai/mongolianSuffix.test.ts",
+    "test:telephony": "tsx --test src/telephony/twilioSignature.test.ts src/telephony/streamTokens.test.ts src/telephony/callback.test.ts src/telephony/sip.test.ts src/telephony/reminder.test.ts src/telephony/reminderScheduler.test.ts src/voice/spokenNumbers.test.ts src/voice/timeStretch.test.ts src/ai/mongolianSuffix.test.ts",
     "voice:set": "tsx src/voice/set-voice.ts"
   },
   "dependencies": {
