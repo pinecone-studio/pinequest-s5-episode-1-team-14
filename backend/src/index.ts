@@ -182,9 +182,11 @@ const server = createServer(async (req, res) => {
       return;
     }
     try {
-      const sipLine = sipLines.get(DEFAULT_BUSINESS_ID);
+      // Landing-ийн "над руу залга": CALLBACK_BUSINESS_ID-ийн AI тухайн бизнесийн дугаараас залгана.
+      const businessId = process.env.CALLBACK_BUSINESS_ID || DEFAULT_BUSINESS_ID;
+      const sipLine = sipLines.get(businessId) ?? sipLines.get(DEFAULT_BUSINESS_ID);
       if (sipLine) {
-        res.writeHead(await sipLine.dial(phone.replace(/^\+976/, "")) ? 202 : 502);
+        res.writeHead(await sipLine.dial(phone.replace(/^\+976/, ""), { businessId }) ? 202 : 502);
       } else {
         const result = await startCallback(phone, `${publicBaseUrl(req)}/voice`);
         res.writeHead(result.ok ? 202 : result.reason === "not_configured" ? 503 : 502);
