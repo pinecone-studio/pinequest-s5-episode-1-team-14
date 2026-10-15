@@ -11,6 +11,7 @@ import { EventEmitter } from "node:events";
 import type { WebSocket } from "ws";
 import { issueStreamToken } from "./streamTokens.js";
 import { decodeMuLaw, encodeMuLaw, handleTwilioMediaStream } from "./twilio.js";
+import { createLegTranscriber } from "./bridgeTranscript.js";
 
 const FRAME_BYTES = 160; // 20мс, 8kHz mu-law
 const FRAME_MS = 20;
@@ -243,10 +244,23 @@ type Call = {
   sdp: string;
   stats: { sent: number; received: number; ignored: number; lost: number; late: number; peak: number };
   lastSequence: number;
+  // Ажилтан руу шилжүүлсэн үед: энэ дуудлагын дууг AI-д биш, холбосон дуудлага руу дамжуулна.
+  forward?: (payload: Buffer) => void;
+  peerId?: string;
+  // AI-тай ярилцлагын дуудлагын дугаар (бичвэр хадгалах) ба шилжүүлсний дараах тэмдэглэгч.
+  sessionId?: string;
+  listen?: (payload: Buffer) => void;
 };
+
+// Ажилтан утсаа авахыг хүлээх хугацаа: үүнээс удвал AI зочинтой үргэлжлүүлнэ.
+const TRANSFER_RING_TIMEOUT_MS = 25_000;
+export type SipSocket = { transfer?: (number: string) => Promise<boolean> };
 
 export type SipLine = { dial: (number: string, params?: Record<string, string>) => Promise<boolean> };
 const RING_TIMEOUT_MS = 45_000;
+// Гадагш дуудлагад хариулсны дараа дууны зам нээгдэж, хүн утсаа чихэндээ ойртуулах хугацаа:
+// түүнээс өмнө эхэлсэн мэндчилгээний эхний үгс сонсогдохгүй байсан.
+const OUTBOUND_GREETING_DELAY_MS = 1000;
 
 export async function startSipLine(config: SipConfig): Promise<SipLine> {
   const serverIp = (await lookup(config.server, 4)).address;
@@ -334,6 +348,8 @@ export async function startSipLine(config: SipConfig): Promise<SipLine> {
     }
     call.socket.emit("message", JSON.stringify({ event: "stop" }));
     call.socket.emit("close");
+    // Ажилтантай холбосон бол нөгөө талыг ч таслана.
+    if (call.peerId) endCall(call.peerId, true);
     // Хоцорч ирсэн давтан мессежид хариулахын тулд түр хадгална.
     setTimeout(() => calls.delete(callId), 10_000).unref();
     console.log(`[sip] дуу: илгээсэн ${call.stats.sent} хэсэг, хүлээн авсан ${call.stats.received} (алдагдсан ${call.stats.lost}, хоцорсон ${call.stats.late}, оргил түвшин ${Math.round(call.stats.peak / 327.68)}%), өөр хаягаас ${call.stats.ignored}`);
@@ -382,6 +398,40 @@ export async function startSipLine(config: SipConfig): Promise<SipLine> {
       close() {
         endCall(callId, true);
       },
+      // Зочныг ажилтантай холбоно: ажилтан руу залгаж, авбал хоёр дуудлагын дууг хооронд нь дамжуулна.
+      // AI-ийн яриа (энэ socket) зогсоно. Ажилтан авахгүй бол false, AI үргэлжлүүлнэ.
+      transfer(number: string): Promise<boolean> {
+        return new Promise<boolean>((resolve) => {
+          dial(number, { direction: "transfer" }, {
+            ringTimeoutMs: TRANSFER_RING_TIMEOUT_MS,
+            onAnswered: (peerId, peer) => {
+              const self = calls.get(callId);
+              if (!self || self.ended) {
+                endCall(peerId, true);
+                resolve(false);
+                return;
+              }
+              self.audio.clear();
+              self.forward = (payload) => peer.audio.push(payload);
+              peer.forward = (payload) => self.audio.push(payload);
+              self.peerId = peerId;
+              peer.peerId = callId;
+              // Ажилтантай ярьсныг AI-тай ярьсан бичвэрийн үргэлжлэл болгож тэмдэглэнэ.
+              if (self.sessionId) {
+                self.listen = createLegTranscriber(self.sessionId, "caller");
+                peer.listen = createLegTranscriber(self.sessionId, "staff");
+              }
+              console.log("[sip] зочныг ажилтантай холболоо");
+              // AI-ийн сешнийг хаана; SIP дуудлага (зочин ↔ ажилтан) үргэлжилнэ.
+              socket.emit("message", JSON.stringify({ event: "stop" }));
+              resolve(true);
+            },
+            onFailed: () => resolve(false),
+          }).then((ringing) => {
+            if (!ringing) resolve(false);
+          }, () => resolve(false));
+        });
+      },
     });
     const emitMark = (name: string) => socket.emit("message", JSON.stringify({ event: "mark", mark: { name } }));
 
@@ -421,6 +471,11 @@ export async function startSipLine(config: SipConfig): Promise<SipLine> {
       call.lastSequence = parsed.sequence;
       for (const sample of decodeMuLaw(parsed.payload)) call.stats.peak = Math.max(call.stats.peak, Math.abs(sample));
       recording?.write(parsed.payload);
+      if (call.forward) {
+        call.forward(parsed.payload);
+        call.listen?.(parsed.payload);
+        return;
+      }
       socket.emit("message", JSON.stringify({ event: "media", media: { payload: parsed.payload.toString("base64") } }));
     });
     rtp.on("error", (error) => console.error("[sip] RTP алдаа:", error.message));
@@ -457,9 +512,10 @@ export async function startSipLine(config: SipConfig): Promise<SipLine> {
   function startConversation(callId: string, call: Call, callerPhone: string, params: Record<string, string> = {}): void {
     if (call.ended) return;
     handleTwilioMediaStream(call.socket as unknown as WebSocket);
+    call.sessionId = `SIP${token(12)}`;
     call.socket.emit("message", JSON.stringify({
       event: "start",
-      start: { streamSid: callId, callSid: `SIP${token(12)}`, // Туршилтын дуудлагад өөр бизнесийн AI ярьж болно (params.businessId).
+      start: { streamSid: callId, callSid: call.sessionId, // Туршилтын дуудлагад өөр бизнесийн AI ярьж болно (params.businessId).
       customParameters: { ...params, businessId: params.businessId ?? config.businessId ?? "default", streamToken: issueStreamToken(), callerPhone } },
     }));
   }
@@ -519,7 +575,13 @@ export async function startSipLine(config: SipConfig): Promise<SipLine> {
   }
 
   // Шугамаар гадагш залгана (буцааж залгах, захиалга сануулах). Утас дуугарч эхэлбэл true, татгалзвал false.
-  async function dial(number: string, params: Record<string, string> = {}): Promise<boolean> {
+  // options.onAnswered: хариулсан дуудлагыг AI-тай биш, өөр зүйлтэй (ажилтны шилжүүлэг) холбоно.
+  async function dial(number: string, params: Record<string, string> = {}, options: {
+    ringTimeoutMs?: number;
+    onAnswered?: (callId: string, call: Call) => void;
+    onFailed?: () => void;
+  } = {}): Promise<boolean> {
+    const ringTimeout = options.ringTimeoutMs ?? RING_TIMEOUT_MS;
     if (!registered) return false;
     if (activeCalls() >= MAX_CALLS) return false;
     const { rtp, rtpPort, mediaIp, mediaPort } = await openRtp();
@@ -563,6 +625,7 @@ export async function startSipLine(config: SipConfig): Promise<SipLine> {
       rtpPorts.delete(rtpPort);
       console.error(`[sip] гадагш дуудлага амжилтгүй: ${reason}`);
       finish(false);
+      options.onFailed?.();
     };
     // 2xx-ээс бусад эцсийн хариуг ижил branch-тай ACK-аар баталгаажуулна.
     const ackFailure = (response: SipMessage) => send([`ACK ${uri} SIP/2.0`, viaLine(), "Max-Forwards: 70", `From: ${fromHeader}`, `To: ${header(response, "to")}`,
@@ -614,10 +677,17 @@ export async function startSipLine(config: SipConfig): Promise<SipLine> {
       if (!answer || codec === undefined) {
         console.error("[sip] гадагш дуудлага: дэмжих codec алга");
         endCall(callId, true);
+        options.onFailed?.();
         return;
       }
       console.log("[sip] гадагш дуудлагад хариулав");
-      startConversation(callId, call, number, params);
+      if (options.onAnswered) {
+        options.onAnswered(callId, call);
+        return;
+      }
+      call.timers.push(setTimeout(() => {
+        if (!call.ended) startConversation(callId, call, number, params);
+      }, OUTBOUND_GREETING_DELAY_MS));
     });
 
     console.log("[sip] гадагш залгаж байна");
@@ -629,11 +699,11 @@ export async function startSipLine(config: SipConfig): Promise<SipLine> {
     timers.push(setTimeout(() => {
       if (!dialing.has(callId)) return;
       send([`CANCEL ${uri} SIP/2.0`, viaLine(), "Max-Forwards: 70", `From: ${fromHeader}`, `To: <${uri}>`, `Call-ID: ${callId}`, `CSeq: ${cseq} CANCEL`].join("\r\n") + "\r\nContent-Length: 0\r\n\r\n");
-    }, RING_TIMEOUT_MS));
+    }, ringTimeout));
     // Цуцалсны дараа 487 ирэхгүй бол цэвэрлэнэ.
     timers.push(setTimeout(() => {
       if (dialing.has(callId)) abandon("хариулсангүй");
-    }, RING_TIMEOUT_MS + 5000));
+    }, ringTimeout + 5000));
     return result;
   }
 

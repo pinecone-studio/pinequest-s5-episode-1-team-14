@@ -2,7 +2,8 @@ import { resolve } from "node:path";
 import { readJsonArray, writeJsonArray } from "../storage/jsonFile.js";
 
 // text: null — дуудагч ярьсан боловч бичвэр нь уншигдахуйц биш (загвар өөр хэлээр буруу таньсан).
-export type TranscriptTurn = { role: "caller" | "agent"; text: string | null; at: string };
+// staff: ажилтан руу шилжүүлсний дараах ажилтны яриа.
+export type TranscriptTurn = { role: "caller" | "agent" | "staff"; text: string | null; at: string };
 type Entry = { callId: string; turns: TranscriptTurn[] };
 
 // Дуудлага бүрийн ярианы бичвэр. Харилцагчийн яриа агуулдаг тул data/ дотор (git-д орохгүй) хадгална.
@@ -27,7 +28,7 @@ export class TranscriptStore {
 // эхлэхэд нөгөө талын хуримтлагдсан текст бүтэн ээлж болж хадгалагдана.
 export function createTranscriptRecorder(save: (turn: TranscriptTurn) => void, now: () => string = () => new Date().toISOString()) {
   const pending = { caller: "", agent: "" };
-  function flush(role: TranscriptTurn["role"]): void {
+  function flush(role: "caller" | "agent"): void {
     const text = pending[role].replace(/\s+/g, " ").trim();
     pending[role] = "";
     if (!text) return;
@@ -38,7 +39,7 @@ export function createTranscriptRecorder(save: (turn: TranscriptTurn) => void, n
     caller(delta: string): void { flush("agent"); pending.caller += delta; },
     agent(delta: string): void { flush("caller"); pending.agent += delta; },
     // Бүтэн өгүүлбэр (жишээ нь системийн тоглуулсан мэндчилгээ).
-    say(role: TranscriptTurn["role"], text: string): void { flush("caller"); flush("agent"); pending[role] = text; flush(role); },
+    say(role: "caller" | "agent", text: string): void { flush("caller"); flush("agent"); pending[role] = text; flush(role); },
     endTurn(): void { flush("caller"); flush("agent"); },
   };
 }

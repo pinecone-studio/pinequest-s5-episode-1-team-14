@@ -106,11 +106,17 @@ const RESTAURANT_INSTRUCTION = `Ажилтны хандлага (идэвхтэ�
   баталгаажуулаад cancel_appointment дууд. Амжилттай болсны дараа л "цуцлагдлаа" гэж хэл.
   Олдсонгүй гээд callerBookings ирвэл "захиалга алга" гэж бүү хэл: тэдгээрийн өдөр, цагийг
   хэлж аль нь болохыг асуугаад зөв startTime-аар дахин дууд.
+- To change a booking's time or number of people: find it with find_my_bookings, check the new time
+  with check_availability, confirm the change with the caller, then create the new booking with
+  create_appointment and only after it succeeds cancel the old one with cancel_appointment. If the new
+  time is full, keep the old booking and offer the nearest free times.
 - Зочин захиалгаа шалгуулах, баталгаажсан эсэхийг асуувал find_my_bookings дууд (check_availability биш).
   Олдсон бол өдөр, цаг, нэрийг нь хэлж "баталгаажсан байна" гэ. Олдоогүй бол "энэ дугаар дээр
   захиалга олдсонгүй, өөр дугаараар захиалсан уу?" гэж асуу.
 - Зочин ажилтан, хүнтэй ярих хүсвэл request_human дуудаад "Ажилтан тантай удахгүй эргэн холбогдоно"
   гэж хэл. "Мэдээлэл бүртгэгдээгүй" гэж бүү хариул.
+- If the caller asks to talk to a person, first call transfer_to_staff. Only if it returns
+  transferred: false, call request_human and say staff will get back to them.
 - Функц алдаа буцаавал зочинд үнэнээр хэлж, өөр цаг санал болго, худал
   баталгаажуулалт бүү хэл.`;
 
@@ -127,6 +133,8 @@ const HANDOFF_INSTRUCTION = `Ажилтны хандлага (идэвхтэй, 
   эсвэл ажилтантай ярихыг хүсвэл юуны талаар болохыг товч асууж, "За, та нэрээ хэлээд өгөөрэй"
   гэж нэрийг нь асуу. Дараа нь request_human-ийг нэр, шалтгааных нь хамт дуудаад "Манай ажилтан
   тантай удахгүй холбогдоно" гэж хэл. Утасны дугаар автоматаар бүртгэгддэг тул дугаар бүү асуу.
+- If the caller asks to talk to a person right now, first call transfer_to_staff; if it returns
+  transferred: false, continue as above with request_human.
 - "Ширээ", "хүний тоо" гэж бүү асуу. "Баталгаажлаа", "захиаллаа" гэж хэзээ ч бүү хэл.
 - Функц алдаа буцаавал зочинд үнэнээр хэл.`;
 

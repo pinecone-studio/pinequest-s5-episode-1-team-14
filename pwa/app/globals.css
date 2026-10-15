@@ -151,6 +151,7 @@ ul { padding: 0; list-style: none; }
 .talk li { max-width: 82%; padding: 10px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-2); }
 .talk .talk-caller { justify-self: start; border-bottom-left-radius: 4px; }
 .talk .talk-agent { justify-self: end; border-color: transparent; border-bottom-right-radius: 4px; background: color-mix(in srgb, var(--series) 20%, var(--surface)); }
+.talk .talk-staff { justify-self: end; border-color: transparent; border-bottom-right-radius: 4px; background: color-mix(in srgb, var(--green) 18%, var(--surface)); }
 .talk-who { display: block; margin-bottom: 2px; color: var(--text-3); font-size: 12px; }
 .talk-unclear, .talk-empty { color: var(--text-3); font-style: italic; }
 .detail-meta { margin-top: 14px; color: var(--text-3); font-size: 12px; overflow-wrap: anywhere; }

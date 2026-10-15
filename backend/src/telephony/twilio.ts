@@ -17,6 +17,7 @@ import { CallSessionStore } from "../calls/store.js";
 import { inferIntent } from "../calls/intent.js";
 import { createTranscriptRecorder, TranscriptStore } from "../calls/transcript.js";
 import { consumeStreamToken } from "./streamTokens.js";
+import type { SipSocket } from "./sip.js";
 import type { Booking } from "../calendar/googleCalendar.js";
 
 // AI-ийн ярианы хурд (1 = ElevenLabs-ийн анхдагч). Утсанд 1.15 хурдан ч ойлгомжтой.
@@ -38,6 +39,21 @@ const PHONE_PATTERN = /^(?:\d{8}|\+[1-9]\d{7,14})$/;
 const BARGE_IN_RMS_THRESHOLD = 600;
 // AI ярьж дууссаны дараа цуурайн үлдэгдэл орж ирэх хугацаа.
 const ECHO_TAIL_MS = 500;
+// AI end_call дуудсаны дараа баяртай гэсэн үг тоглож дуусаад энэ хугацаанд зочин дуугарахгүй бол утсаа тавина.
+const HANGUP_GRACE_MS = 800;
+// Тоглуулалт ямар нэг шалтгаанаар дуусахгүй бол үүнээс удаан хүлээхгүй.
+const HANGUP_MAX_WAIT_MS = 20_000;
+// Ажилтан руу шилжүүлэхийн өмнө AI-ийн "холбож байна" гэх үг дуусахыг хүлээх дээд хугацаа.
+const TRANSFER_SPEECH_WAIT_MS = 8000;
+// STAFF_HOURS="10-22" (Улаанбаатарын цаг): энэ цагаас гадуур шилжүүлэхгүй, хүсэлтийг бүртгэнэ.
+const staffHour = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Ulaanbaatar", hour: "2-digit", hourCycle: "h23" });
+export function staffAvailable(env: NodeJS.ProcessEnv = process.env, now = new Date()): boolean {
+  if (!env.STAFF_PHONE?.replace(/\D/g, "")) return false;
+  const [from, to] = (env.STAFF_HOURS ?? "").split("-").map(Number);
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from >= to) return true;
+  const hour = Number(staffHour.format(now));
+  return hour >= from && hour < to;
+}
 // Мэндчилгээг дуустал хамгаална; тоглуулж чадаагүй тохиолдолд үүнээс урт хүлээхгүй.
 const GREETING_GUARD_MS = 15_000;
 
@@ -177,6 +193,52 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
     const speaking = streaming || marksPending > 0 || Date.now() - lastPlayedAt < ECHO_TAIL_MS;
     return speaking ? "speaking" : "silent";
   }
+  // AI дуудлагыг дуусгах гэж буй (end_call): ярих зүйл дуусмагц утсаа тавина.
+  let queuedSpeech = 0;
+  let hangupRequested = false;
+  let hangupAt = 0;
+  let hangupTimer: NodeJS.Timeout | undefined;
+  function scheduleHangup(): void {
+    clearTimeout(hangupTimer);
+    if (!hangupAt || closed) return;
+    const idle = queuedSpeech === 0 && !streaming && marksPending === 0;
+    const overdue = Date.now() - hangupAt > HANGUP_MAX_WAIT_MS;
+    hangupTimer = setTimeout(() => {
+      if (!hangupAt || closed) return;
+      if (overdue || (queuedSpeech === 0 && !streaming && marksPending === 0)) {
+        console.log("[twilio] AI яриагаа дуусгаж утсаа тавилаа");
+        ws.close();
+      } else {
+        scheduleHangup();
+      }
+    }, idle || overdue ? HANGUP_GRACE_MS : 200);
+  }
+  // Зочныг ажилтан руу шилжүүлнэ (SIP шугамаар ирсэн дуудлагад). AI-ийн хэлж буй үгийг дуусгаад холбоно.
+  async function onTransfer(): Promise<unknown> {
+    const sip = ws as unknown as SipSocket;
+    if (!sip.transfer || !staffAvailable()) {
+      return { transferred: false, reason: "No staff can take the call now." };
+    }
+    if (pendingText.trim()) enqueueSpeak(pendingText);
+    pendingText = "";
+    for (let waited = 0; waited < TRANSFER_SPEECH_WAIT_MS && (queuedSpeech > 0 || streaming || marksPending > 0); waited += 100) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (closed) return { transferred: false, reason: "The call has ended." };
+    try {
+      store.update(callId, { intent: "REQUEST_HUMAN" });
+    } catch (error) {
+      console.error("[twilio] шилжүүлэлтийг бүртгэж чадсангүй:", error);
+    }
+    const transferred = await sip.transfer(String(process.env.STAFF_PHONE).replace(/\D/g, ""));
+    console.log(`[twilio] ажилтан руу шилжүүлэх: ${transferred ? "холбогдлоо" : "ажилтан авсангүй"}`);
+    return transferred ? { transferred: true } : { transferred: false, reason: "Staff did not answer." };
+  }
+  function cancelHangup(): void {
+    hangupRequested = false;
+    hangupAt = 0;
+    clearTimeout(hangupTimer);
+  }
   // Энэ дуудлагад үүссэн захиалга (дууссаны дараа сануулахад).
   let createdBooking: Booking | null = null;
   let isReminderCall = false;
@@ -236,7 +298,9 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
   // fixed: урьдчилан бэлдсэн (санах ойд хадгалсан) тогтмол өгүүлбэр.
   function enqueueSpeak(text: string, fixed = false): void {
     const generation = speechGeneration;
-    speakQueue = speakQueue.then(() => speak(text, generation, fixed)).catch((error) => console.error("[twilio] ярих алдаа:", error));
+    queuedSpeech++;
+    speakQueue = speakQueue.then(() => speak(text, generation, fixed)).catch((error) => console.error("[twilio] ярих алдаа:", error))
+      .finally(() => { queuedSpeech--; });
   }
 
   // Дуудагч AI-г таслан орж ярихад: тоглуулж буй/дараалалд буй үгсийг хаяж,
@@ -275,6 +339,11 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
 
   function onToolResult(name: string, result: unknown): void {
     if (name === "check_availability") checkedAvailability = true;
+    // Баяртай гэсэн үг дараагийн хэсэгт ирж болох тул хариулт бүрэн дууссаны дараа л тоолж эхэлнэ.
+    if (name === "end_call") {
+      hangupRequested = true;
+      return;
+    }
     if (name === "request_human") {
       try {
         store.update(callId, { intent: "REQUEST_HUMAN" });
@@ -314,6 +383,7 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
   function endCall(): void {
     if (closed) return;
     closed = true;
+    clearTimeout(hangupTimer);
     clearTimeout(startTimer);
     geminiSession?.close();
     if (callId) {
@@ -373,13 +443,22 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
             transcript.agent(delta);
             if (!nativeVoice) onText(delta);
           },
-          onCallerText: transcript.caller,
+          // Баяртай гэсний дараа зочин дахин ярьвал утсаа тавихгүй.
+          onCallerText: (text) => {
+            cancelHangup();
+            transcript.caller(text);
+          },
           onTurnComplete: () => {
             transcript.endTurn();
             if (!nativeVoice) onTurnComplete();
+            if (hangupRequested && !hangupAt) {
+              hangupAt = Date.now();
+              scheduleHangup();
+            }
           },
           onInterrupted,
           speechState,
+          onTransfer,
           onAck,
           onHold,
           onToolResult,

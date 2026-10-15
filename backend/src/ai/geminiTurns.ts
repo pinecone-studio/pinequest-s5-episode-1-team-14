@@ -305,6 +305,7 @@ export async function createGeminiTurnSession(
     const id = ++turn;
     let heard = "";
     let reply = "";
+    let ending = false;
     // Хариулт удаашрах үед л богино үг хэлнэ: зочин хариулт өгсөн бол "За", асуусан бол "За, түр хүлээгээрэй".
     // Хариулт хурдан бэлэн бол юу ч нэмэхгүй: үргэлж "За" гэх нь хиймэл, асуултын өмнө утгагүй.
     let ackTimer: NodeJS.Timeout | undefined;
@@ -370,7 +371,9 @@ export async function createGeminiTurnSession(
       turnContents.push({ role: "model", parts });
       const calls = parts.flatMap((part) => (part.functionCall ? [part.functionCall] : []));
       if (!calls.length) break;
-      if (!reply.trim()) {
+      if (calls.some((call) => call.name === "end_call")) ending = true;
+      // Утас тавихын өмнө "түр хүлээгээрэй" гэхгүй.
+      if (!reply.trim() && calls.some((call) => call.name !== "end_call")) {
         reply += `${WAIT_TEXT} `;
         // Хариулт бүтнээрээ уншигддаг тул хүлээлгийн үгийг тусад нь шууд хэлүүлнэ.
         if (callbacks.onHold) callbacks.onHold(WAIT_TEXT);
@@ -378,14 +381,15 @@ export async function createGeminiTurnSession(
       }
       const responses: Part[] = [];
       for (const call of calls) {
-        const result = await runTool(call.name ?? "", (call.args ?? {}) as Record<string, unknown>, { callerPhone: context.callerPhone, businessId: context.businessId });
+        const result = await runTool(call.name ?? "", (call.args ?? {}) as Record<string, unknown>, { callerPhone: context.callerPhone, businessId: context.businessId, transfer: callbacks.onTransfer });
         callbacks.onToolResult?.(call.name ?? "", result);
         responses.push({ functionResponse: { name: call.name, id: call.id, response: { result: toUlaanbaatarTimes(result) } } });
       }
       turnContents.push({ role: "user", parts: responses });
     }
 
-    if (!reply.trim()) callbacks.onText?.(RETRY_TEXT);
+    // Баяртай гээд утсаа тавих гэж буй бол "дахин хэлнэ үү" гэхгүй.
+    if (!reply.trim() && !ending) callbacks.onText?.(RETRY_TEXT);
     console.log(`[turns] яриа ${(utterance.length / SAMPLE_RATE).toFixed(1)}с → эхний үг ${firstAt}мс, нийт ${Date.now() - startedAt}мс`);
     // Түүхэнд дууг биш сонссон текстийг үлдээнэ: дараагийн хүсэлтүүд жижиг, хурдан байна.
     turnContents[0] = { role: "user", parts: [{ text: heard || "(сонсогдоогүй)" }] };
