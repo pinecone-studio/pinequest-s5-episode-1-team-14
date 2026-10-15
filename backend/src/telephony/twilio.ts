@@ -8,6 +8,7 @@ import type { WebSocket, RawData } from "ws";
 import { createGeminiLiveSession, type SpeechState } from "../ai/geminiLive.js";
 import { createGeminiTurnSession } from "../ai/geminiTurns.js";
 import { AccountStore, DEFAULT_BUSINESS_ID, voiceIdFor } from "../accounts/store.js";
+import { takeSentences } from "./sentences.js";
 import { greetingFor } from "../ai/callPrompt.js";
 import { speakNumbers, speakPhoneNumbers, speakTimes } from "../voice/spokenNumbers.js";
 import { createTimeStretcher } from "../voice/timeStretch.js";
@@ -311,6 +312,7 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
   function onInterrupted(): void {
     speechGeneration++;
     pendingText = "";
+    acked = false;
     marksPending = 0;
     if (!closed && streamSid) ws.send(JSON.stringify({ event: "clear", streamSid }));
   }
@@ -323,8 +325,23 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
 
   // Хариултыг бүтнээр нь нэг дор уншуулна: өгүүлбэр бүрийг тусад нь уншвал аялга тасарч,
   // нэг хэвийн сонсогддог. Эхний дуу ~0.25с хоцорно (Gemini хариултаа дуусгах хугацаа).
+  // Бүтэн өгүүлбэр бэлэн болмогц уншиж эхэлнэ: урт хариултыг бүтнээр нь хүлээхэд ~0.5-1с алддаг.
+  // Зөвхөн өгүүлбэрийн төгсгөлд (. ? !) хуваана — таслал дээр хуваавал аялга тасарна.
   function onText(delta: string): void {
-    pendingText += delta;
+    if (acked) {
+      const text = pendingText + delta;
+      // Эхний үг бүрэн ирэхийг хүлээнэ ("За" эсвэл "Зарим" гэдгийг ялгахын тулд).
+      if (/^\s*\S*$/u.test(text)) {
+        pendingText = text;
+        return;
+      }
+      acked = false;
+      pendingText = "";
+      delta = text.replace(/^\s*За[,.!]?\s+/u, "");
+    }
+    const { sentences, rest } = takeSentences(pendingText + delta);
+    sentences.forEach((sentence) => enqueueSpeak(sentence));
+    pendingText = rest;
   }
 
   function onHold(text: string): void {
@@ -333,7 +350,10 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
     enqueueSpeak(text, true);
   }
 
+  // Систем "За" гэсэн эргэлтэд AI-ийн хариултын эхний "За"-г хасна: "За. За, ..." гэж давхардахгүй.
+  let acked = false;
   function onAck(text: string): void {
+    acked = true;
     enqueueSpeak(text, true);
   }
 
@@ -371,6 +391,9 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
   }
 
   function onTurnComplete(): void {
+    // Хариулт бүхэлдээ "За." байвал систем аль хэдийн хэлсэн.
+    if (acked && /^\s*За[,.!]?\s*$/u.test(pendingText)) pendingText = "";
+    acked = false;
     if (pendingText.trim()) enqueueSpeak(pendingText);
     pendingText = "";
   }
@@ -424,13 +447,14 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
         // Gemini холбогдох хооронд дуудагч чимээгүй хүлээхгүйн тулд эхэлж мэндэлнэ.
         // Сануулах дуудлагад мэндчилгээ, заавар нь захиалга бүрээр өөр (кэшлэхгүй).
         const params = message.start.customParameters ?? {};
-        const reminder = params.direction === "reminder" && params.greeting ? params : null;
+        // Гадагш дуудлага (сануулга, буцааж залгах): мэндчилгээ, зааврыг params-аар өгнө.
+        const reminder = (params.direction === "reminder" || params.direction === "callback") && params.greeting ? params : null;
         isReminderCall = params.direction === "reminder";
         callBusinessId = businessId;
         // Бизнесийн нэрээр мэндэлнэ.
         const greeting = reminder?.greeting ?? business?.greeting ?? greetingFor(business?.name);
         if (!nativeVoice) {
-          enqueueSpeak(greeting, !reminder);
+          enqueueSpeak(greeting, params.direction !== "reminder");
           transcript.say("agent", greeting);
         }
         // Анхдагч нь ээлжилсэн горим (монгол яриаг илүү таньдаг). Gemini-ийн өөрийн дуу эсвэл AI_MODE=live бол Live.
