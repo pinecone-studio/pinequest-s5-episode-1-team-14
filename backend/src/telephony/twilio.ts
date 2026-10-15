@@ -5,7 +5,7 @@
 // (ElevenLabs-ийн алхамгүй тул хурдан, гэхдээ хувилсан дуу хоолой биш).
 
 import type { WebSocket, RawData } from "ws";
-import { createGeminiLiveSession } from "../ai/geminiLive.js";
+import { createGeminiLiveSession, type SpeechState } from "../ai/geminiLive.js";
 import { createGeminiTurnSession } from "../ai/geminiTurns.js";
 import { AccountStore, DEFAULT_BUSINESS_ID, voiceIdFor } from "../accounts/store.js";
 import { greetingFor } from "../ai/callPrompt.js";
@@ -36,6 +36,10 @@ const PHONE_PATTERN = /^(?:\d{8}|\+[1-9]\d{7,14})$/;
 // хоолойн эрч хүчийг шууд хэмжиж, AI тоглуулж байх үед илрэвэл дотооддоо
 // давхар таслана.
 const BARGE_IN_RMS_THRESHOLD = 600;
+// AI ярьж дууссаны дараа цуурайн үлдэгдэл орж ирэх хугацаа.
+const ECHO_TAIL_MS = 500;
+// Мэндчилгээг дуустал хамгаална; тоглуулж чадаагүй тохиолдолд үүнээс урт хүлээхгүй.
+const GREETING_GUARD_MS = 15_000;
 
 function linearToMuLaw(sampleIn: number): number {
   let sample = sampleIn;
@@ -164,6 +168,15 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
   let marksPending = 0;
   let geminiSession: Awaited<ReturnType<typeof createGeminiTurnSession>> | null = null;
   let closed = false;
+  // Мэндчилгээ тоглож дуусах хүртэл (эхний mark ирэх хүртэл) зочны дууг сонсохгүй.
+  let greetingDone = false;
+  let lastPlayedAt = 0;
+  const openedAt = Date.now();
+  function speechState(): SpeechState {
+    if (!greetingDone && Date.now() - openedAt < GREETING_GUARD_MS) return "protected";
+    const speaking = streaming || marksPending > 0 || Date.now() - lastPlayedAt < ECHO_TAIL_MS;
+    return speaking ? "speaking" : "silent";
+  }
   // Энэ дуудлагад үүссэн захиалга (дууссаны дараа сануулахад).
   let createdBooking: Booking | null = null;
   let isReminderCall = false;
@@ -366,6 +379,7 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
             if (!nativeVoice) onTurnComplete();
           },
           onInterrupted,
+          speechState,
           onAck,
           onHold,
           onToolResult,
@@ -399,6 +413,8 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
       if (message.event === "mark") {
         // Таслагдсан үеийн mark-ийг тоолохгүй (clear хийхэд Twilio тэднийг ч буцаадаг).
         if (message.mark.name === String(speechGeneration) && marksPending > 0) marksPending--;
+        greetingDone = true;
+        lastPlayedAt = Date.now();
         return;
       }
 
