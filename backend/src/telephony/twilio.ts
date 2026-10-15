@@ -447,13 +447,14 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
         // Gemini холбогдох хооронд дуудагч чимээгүй хүлээхгүйн тулд эхэлж мэндэлнэ.
         // Сануулах дуудлагад мэндчилгээ, заавар нь захиалга бүрээр өөр (кэшлэхгүй).
         const params = message.start.customParameters ?? {};
-        const reminder = params.direction === "reminder" && params.greeting ? params : null;
+        // Гадагш дуудлага (сануулга, буцааж залгах): мэндчилгээ, зааврыг params-аар өгнө.
+        const reminder = (params.direction === "reminder" || params.direction === "callback") && params.greeting ? params : null;
         isReminderCall = params.direction === "reminder";
         callBusinessId = businessId;
         // Бизнесийн нэрээр мэндэлнэ.
         const greeting = reminder?.greeting ?? business?.greeting ?? greetingFor(business?.name);
         if (!nativeVoice) {
-          enqueueSpeak(greeting, !reminder);
+          enqueueSpeak(greeting, params.direction !== "reminder");
           transcript.say("agent", greeting);
         }
         // Анхдагч нь ээлжилсэн горим (монгол яриаг илүү таньдаг). Gemini-ийн өөрийн дуу эсвэл AI_MODE=live бол Live.

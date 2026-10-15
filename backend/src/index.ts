@@ -8,7 +8,7 @@ import { issueStreamToken } from "./telephony/streamTokens.js";
 import { startSipLine, type SipLine } from "./telephony/sip.js";
 import { LineStore, type Line } from "./telephony/lines.js";
 import { createCallbackLimiter, normalizeMongolianNumber, startCallback } from "./telephony/callback.js";
-import { ACK_PHRASES, greetingFor } from "./ai/callPrompt.js";
+import { ACK_PHRASES, CALLBACK_GREETING, CALLBACK_INSTRUCTION, greetingFor } from "./ai/callPrompt.js";
 import { WAIT_TEXT } from "./ai/geminiTurns.js";
 import { cachedUlaw8k } from "./voice/elevenlabs.js";
 import { CallSessionStore } from "./calls/store.js";
@@ -186,7 +186,9 @@ const server = createServer(async (req, res) => {
       const businessId = process.env.CALLBACK_BUSINESS_ID || DEFAULT_BUSINESS_ID;
       const sipLine = sipLines.get(businessId) ?? sipLines.get(DEFAULT_BUSINESS_ID);
       if (sipLine) {
-        res.writeHead(await sipLine.dial(phone.replace(/^\+976/, ""), { businessId }) ? 202 : 502);
+        res.writeHead(await sipLine.dial(phone.replace(/^\+976/, ""), {
+          businessId, direction: "callback", greeting: CALLBACK_GREETING, instruction: CALLBACK_INSTRUCTION,
+        }) ? 202 : 502);
       } else {
         const result = await startCallback(phone, `${publicBaseUrl(req)}/voice`);
         res.writeHead(result.ok ? 202 : result.reason === "not_configured" ? 503 : 502);
@@ -405,7 +407,7 @@ server.listen(PORT, () => {
   // Эхний дуудлага ч мэндчилгээг шууд сонсохын тулд урьдчилан бэлдэнэ.
   if (process.env.VOICE_MODE !== "gemini" && process.env.ELEVENLABS_API_KEY) {
     const greetings = accounts.businesses().filter((business) => !business.voice).map((business) => business.greeting ?? greetingFor(business.name));
-    for (const phrase of [...greetings, ...ACK_PHRASES, WAIT_TEXT]) {
+    for (const phrase of [...greetings, CALLBACK_GREETING, ...ACK_PHRASES, WAIT_TEXT]) {
       cachedUlaw8k(phrase).catch((error) => console.error("[voice] тогтмол өгүүлбэрийг урьдчилан бэлдэж чадсангүй:", error));
     }
   }

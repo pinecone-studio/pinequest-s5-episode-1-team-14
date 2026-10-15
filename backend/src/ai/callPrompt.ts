@@ -16,6 +16,9 @@ export const ACK_PHRASES = ["За."];
 export const greetingFor = (businessName?: string) =>
   businessName ? `Сайн байна уу? Та ${withSuffix(businessName, "comitative")} холбогдлоо. Танд юугаар туслах вэ?` : "Сайн байна уу? Танд юугаар туслах вэ?";
 export const CALL_GREETING = greetingFor();
+// Landing-ийн "над руу залга": AI өөрөө залгасан тул "юу сонирхож залгасан" гэж асуухгүй.
+export const CALLBACK_GREETING = "Сайн байна уу, би CallAI-ийн AI туслах байна. Таны хүсэлтээр залгалаа. Юу сонирхож байна вэ?";
+export const CALLBACK_INSTRUCTION = "Энэ дуудлагыг харилцагч сайтаас хүссэнээр чи өөрөө залгасан (харилцагч залгаагүй).";
 
 const PERSONA_INSTRUCTION = `Чи бол Улаанбаатар хотын жижиг рестораны монгол
 хэлээр ярьдаг AI ресепшн ажилтан. Зочдод эелдэг, товч, ойлгомжтой хариулна.
