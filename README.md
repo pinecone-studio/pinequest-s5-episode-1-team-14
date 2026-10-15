@@ -10,7 +10,7 @@ and pick the AI's voice.
 | | |
 | --- | --- |
 | Website and dashboard | [callai.world](https://callai.world) |
-| Demo phone number | **7515 5562** (call from any Mongolian phone) |
+| Demo phone number | shown on [callai.world](https://callai.world) (call from any Mongolian phone) |
 | Backend API | `https://api.callai.world` |
 
 ## How a call works
