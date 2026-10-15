@@ -71,6 +71,11 @@ export const TOOLS: Tool[] = [
         description: "Зочин ажилтан, хүнтэй ярих хүсэлтийг бүртгэх — ажилтан эргэн холбогдоно.",
         parameters: { type: Type.OBJECT, properties: { reason: { type: Type.STRING, description: "Юуны талаар ярих хүсэлтэй" } } },
       },
+      {
+        name: "end_call",
+        description: "Hang up the phone call. Use it in the same reply as your goodbye, once the caller has said they need nothing else. The line closes after your goodbye has finished playing; if the caller speaks again, the call continues.",
+        parameters: { type: Type.OBJECT, properties: {} },
+      },
     ],
   },
 ];
@@ -123,6 +128,9 @@ export async function runTool(name: string, args: Record<string, unknown>, conte
       case "request_human":
         // Dashboard-д "ажилтантай холбогдох" гэж тэмдэглэгдэнэ (onToolResult).
         return { recorded: true };
+      case "end_call":
+        // Утсыг дуудлагын хэсэг баяртай гэсэн үг тоглож дууссаны дараа тавина (onToolResult).
+        return { ending: true };
       default:
         return { error: `Үл мэдэгдэх function: ${name}` };
     }

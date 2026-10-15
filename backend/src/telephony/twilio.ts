@@ -38,6 +38,10 @@ const PHONE_PATTERN = /^(?:\d{8}|\+[1-9]\d{7,14})$/;
 const BARGE_IN_RMS_THRESHOLD = 600;
 // AI ярьж дууссаны дараа цуурайн үлдэгдэл орж ирэх хугацаа.
 const ECHO_TAIL_MS = 500;
+// AI end_call дуудсаны дараа баяртай гэсэн үг тоглож дуусаад энэ хугацаанд зочин дуугарахгүй бол утсаа тавина.
+const HANGUP_GRACE_MS = 800;
+// Тоглуулалт ямар нэг шалтгаанаар дуусахгүй бол үүнээс удаан хүлээхгүй.
+const HANGUP_MAX_WAIT_MS = 20_000;
 // Мэндчилгээг дуустал хамгаална; тоглуулж чадаагүй тохиолдолд үүнээс урт хүлээхгүй.
 const GREETING_GUARD_MS = 15_000;
 
@@ -177,6 +181,31 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
     const speaking = streaming || marksPending > 0 || Date.now() - lastPlayedAt < ECHO_TAIL_MS;
     return speaking ? "speaking" : "silent";
   }
+  // AI дуудлагыг дуусгах гэж буй (end_call): ярих зүйл дуусмагц утсаа тавина.
+  let queuedSpeech = 0;
+  let hangupRequested = false;
+  let hangupAt = 0;
+  let hangupTimer: NodeJS.Timeout | undefined;
+  function scheduleHangup(): void {
+    clearTimeout(hangupTimer);
+    if (!hangupAt || closed) return;
+    const idle = queuedSpeech === 0 && !streaming && marksPending === 0;
+    const overdue = Date.now() - hangupAt > HANGUP_MAX_WAIT_MS;
+    hangupTimer = setTimeout(() => {
+      if (!hangupAt || closed) return;
+      if (overdue || (queuedSpeech === 0 && !streaming && marksPending === 0)) {
+        console.log("[twilio] AI яриагаа дуусгаж утсаа тавилаа");
+        ws.close();
+      } else {
+        scheduleHangup();
+      }
+    }, idle || overdue ? HANGUP_GRACE_MS : 200);
+  }
+  function cancelHangup(): void {
+    hangupRequested = false;
+    hangupAt = 0;
+    clearTimeout(hangupTimer);
+  }
   // Энэ дуудлагад үүссэн захиалга (дууссаны дараа сануулахад).
   let createdBooking: Booking | null = null;
   let isReminderCall = false;
@@ -236,7 +265,9 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
   // fixed: урьдчилан бэлдсэн (санах ойд хадгалсан) тогтмол өгүүлбэр.
   function enqueueSpeak(text: string, fixed = false): void {
     const generation = speechGeneration;
-    speakQueue = speakQueue.then(() => speak(text, generation, fixed)).catch((error) => console.error("[twilio] ярих алдаа:", error));
+    queuedSpeech++;
+    speakQueue = speakQueue.then(() => speak(text, generation, fixed)).catch((error) => console.error("[twilio] ярих алдаа:", error))
+      .finally(() => { queuedSpeech--; });
   }
 
   // Дуудагч AI-г таслан орж ярихад: тоглуулж буй/дараалалд буй үгсийг хаяж,
@@ -275,6 +306,11 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
 
   function onToolResult(name: string, result: unknown): void {
     if (name === "check_availability") checkedAvailability = true;
+    // Баяртай гэсэн үг дараагийн хэсэгт ирж болох тул хариулт бүрэн дууссаны дараа л тоолж эхэлнэ.
+    if (name === "end_call") {
+      hangupRequested = true;
+      return;
+    }
     if (name === "request_human") {
       try {
         store.update(callId, { intent: "REQUEST_HUMAN" });
@@ -314,6 +350,7 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
   function endCall(): void {
     if (closed) return;
     closed = true;
+    clearTimeout(hangupTimer);
     clearTimeout(startTimer);
     geminiSession?.close();
     if (callId) {
@@ -373,10 +410,18 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
             transcript.agent(delta);
             if (!nativeVoice) onText(delta);
           },
-          onCallerText: transcript.caller,
+          // Баяртай гэсний дараа зочин дахин ярьвал утсаа тавихгүй.
+          onCallerText: (text) => {
+            cancelHangup();
+            transcript.caller(text);
+          },
           onTurnComplete: () => {
             transcript.endTurn();
             if (!nativeVoice) onTurnComplete();
+            if (hangupRequested && !hangupAt) {
+              hangupAt = Date.now();
+              scheduleHangup();
+            }
           },
           onInterrupted,
           speechState,
