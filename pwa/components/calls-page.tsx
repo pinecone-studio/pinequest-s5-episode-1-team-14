@@ -68,7 +68,7 @@ export default function CallsPage({ calls, source, transcripts }: {
               <tr className="detail" id={detailId} hidden={!open}><td colSpan={7}>
                 {turns.length ? <ol className="talk" aria-label="Ярианы бичвэр">
                   {turns.map((turn, index) => <li key={index} className={"talk-" + turn.role}>
-                    <span className="talk-who">{turn.role === "agent" ? "AI туслах" : "Дуудагч"}</span>
+                    <span className="talk-who">{turn.role === "agent" ? "AI туслах" : turn.role === "staff" ? "Ажилтан" : "Дуудагч"}</span>
                     {turn.text === null ? <p className="talk-unclear">Яриаг бичвэр болгож чадсангүй</p> : <p>{turn.text}</p>}
                   </li>)}
                 </ol> : <p className="talk-empty">{call.status === "active" ? "Яриа эхэлмэгц бичвэр энд гарна." : "Энэ дуудлагын ярианы бичвэр хадгалагдаагүй."}</p>}

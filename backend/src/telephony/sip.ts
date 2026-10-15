@@ -11,6 +11,7 @@ import { EventEmitter } from "node:events";
 import type { WebSocket } from "ws";
 import { issueStreamToken } from "./streamTokens.js";
 import { decodeMuLaw, encodeMuLaw, handleTwilioMediaStream } from "./twilio.js";
+import { createLegTranscriber } from "./bridgeTranscript.js";
 
 const FRAME_BYTES = 160; // 20мс, 8kHz mu-law
 const FRAME_MS = 20;
@@ -246,6 +247,9 @@ type Call = {
   // Ажилтан руу шилжүүлсэн үед: энэ дуудлагын дууг AI-д биш, холбосон дуудлага руу дамжуулна.
   forward?: (payload: Buffer) => void;
   peerId?: string;
+  // AI-тай ярилцлагын дуудлагын дугаар (бичвэр хадгалах) ба шилжүүлсний дараах тэмдэглэгч.
+  sessionId?: string;
+  listen?: (payload: Buffer) => void;
 };
 
 // Ажилтан утсаа авахыг хүлээх хугацаа: үүнээс удвал AI зочинтой үргэлжлүүлнэ.
@@ -412,6 +416,11 @@ export async function startSipLine(config: SipConfig): Promise<SipLine> {
               peer.forward = (payload) => self.audio.push(payload);
               self.peerId = peerId;
               peer.peerId = callId;
+              // Ажилтантай ярьсныг AI-тай ярьсан бичвэрийн үргэлжлэл болгож тэмдэглэнэ.
+              if (self.sessionId) {
+                self.listen = createLegTranscriber(self.sessionId, "caller");
+                peer.listen = createLegTranscriber(self.sessionId, "staff");
+              }
               console.log("[sip] зочныг ажилтантай холболоо");
               // AI-ийн сешнийг хаана; SIP дуудлага (зочин ↔ ажилтан) үргэлжилнэ.
               socket.emit("message", JSON.stringify({ event: "stop" }));
@@ -464,6 +473,7 @@ export async function startSipLine(config: SipConfig): Promise<SipLine> {
       recording?.write(parsed.payload);
       if (call.forward) {
         call.forward(parsed.payload);
+        call.listen?.(parsed.payload);
         return;
       }
       socket.emit("message", JSON.stringify({ event: "media", media: { payload: parsed.payload.toString("base64") } }));
@@ -502,9 +512,10 @@ export async function startSipLine(config: SipConfig): Promise<SipLine> {
   function startConversation(callId: string, call: Call, callerPhone: string, params: Record<string, string> = {}): void {
     if (call.ended) return;
     handleTwilioMediaStream(call.socket as unknown as WebSocket);
+    call.sessionId = `SIP${token(12)}`;
     call.socket.emit("message", JSON.stringify({
       event: "start",
-      start: { streamSid: callId, callSid: `SIP${token(12)}`, // Туршилтын дуудлагад өөр бизнесийн AI ярьж болно (params.businessId).
+      start: { streamSid: callId, callSid: call.sessionId, // Туршилтын дуудлагад өөр бизнесийн AI ярьж болно (params.businessId).
       customParameters: { ...params, businessId: params.businessId ?? config.businessId ?? "default", streamToken: issueStreamToken(), callerPhone } },
     }));
   }
