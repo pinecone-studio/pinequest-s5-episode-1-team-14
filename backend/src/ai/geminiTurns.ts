@@ -26,9 +26,10 @@ const MAX_TOOL_ROUNDS = 3;
 const FIRST_CHUNK_TIMEOUT_MS = 7000;
 export const WAIT_TEXT = "За, түр хүлээгээрэй.";
 export const ANSWER_ACK = "За.";
-// Gemini-ийн эхний үг ~1.2с-д ирдэг: хариулт өгсөн зочинд 1с, асуусан зочинд 1.6с хүлээгээд л богино үг хэлнэ.
-const ANSWER_ACK_MS = 1000;
-const QUESTION_ACK_MS = 1600;
+// Хариулт өгүүлбэрээр уншигддаг тул ихэвчлэн 2с-ээс өмнө эхэлнэ; түүнээс удаашрахад л богино үг хэлнэ.
+// 1с-д хэлэхэд бараг эргэлт бүрт "За" гарч хэт давтагдсан.
+const ANSWER_ACK_MS = 2000;
+const QUESTION_ACK_MS = 2000;
 
 // Зочны хэлсэн нь асуулт уу ("хэд вэ?", "байгаа юу", "хаана"): асуултын өмнө "За" гэхгүй.
 export function isQuestion(text: string): boolean {

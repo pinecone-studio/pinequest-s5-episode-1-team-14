@@ -312,6 +312,7 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
   function onInterrupted(): void {
     speechGeneration++;
     pendingText = "";
+    acked = false;
     marksPending = 0;
     if (!closed && streamSid) ws.send(JSON.stringify({ event: "clear", streamSid }));
   }
@@ -327,6 +328,17 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
   // Бүтэн өгүүлбэр бэлэн болмогц уншиж эхэлнэ: урт хариултыг бүтнээр нь хүлээхэд ~0.5-1с алддаг.
   // Зөвхөн өгүүлбэрийн төгсгөлд (. ? !) хуваана — таслал дээр хуваавал аялга тасарна.
   function onText(delta: string): void {
+    if (acked) {
+      const text = pendingText + delta;
+      // Эхний үг бүрэн ирэхийг хүлээнэ ("За" эсвэл "Зарим" гэдгийг ялгахын тулд).
+      if (/^\s*\S*$/u.test(text)) {
+        pendingText = text;
+        return;
+      }
+      acked = false;
+      pendingText = "";
+      delta = text.replace(/^\s*За[,.!]?\s+/u, "");
+    }
     const { sentences, rest } = takeSentences(pendingText + delta);
     sentences.forEach((sentence) => enqueueSpeak(sentence));
     pendingText = rest;
@@ -338,7 +350,10 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
     enqueueSpeak(text, true);
   }
 
+  // Систем "За" гэсэн эргэлтэд AI-ийн хариултын эхний "За"-г хасна: "За. За, ..." гэж давхардахгүй.
+  let acked = false;
   function onAck(text: string): void {
+    acked = true;
     enqueueSpeak(text, true);
   }
 
@@ -376,6 +391,9 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
   }
 
   function onTurnComplete(): void {
+    // Хариулт бүхэлдээ "За." байвал систем аль хэдийн хэлсэн.
+    if (acked && /^\s*За[,.!]?\s*$/u.test(pendingText)) pendingText = "";
+    acked = false;
     if (pendingText.trim()) enqueueSpeak(pendingText);
     pendingText = "";
   }
