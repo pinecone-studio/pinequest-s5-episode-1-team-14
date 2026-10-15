@@ -257,6 +257,10 @@ ul { padding: 0; list-style: none; }
 .agenda-time small { display: block; color: var(--text-3); font-size: 12px; font-weight: 400; letter-spacing: 0; }
 .agenda-title { font-weight: 500; }
 .agenda-sub { color: var(--text-3); font-size: 13px; font-variant-numeric: tabular-nums; }
+.agenda-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.agenda-actions { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); }
+.agenda-note { margin-top: 4px; font-size: 13px; color: var(--text-2); }
+.agenda-note.is-error { color: var(--red); }
 
 /* ---------- Тайлан ---------- */
 .stats-lead { grid-template-columns: 1.5fr repeat(3, minmax(0, 1fr)); }
@@ -305,6 +309,8 @@ ul { padding: 0; list-style: none; }
   .hero-value { font-size: 52px; }
   .feed li { grid-template-columns: 36px minmax(0, 1fr) auto; }
   .feed-meta:not(.feed-time), .feed .badge { display: none; }
+  .agenda li { grid-template-columns: 60px minmax(0, 1fr); }
+  .agenda-side { grid-column: 2; flex-direction: row; flex-wrap: wrap; align-items: center; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }

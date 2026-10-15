@@ -17,6 +17,7 @@ import { CallSessionStore } from "../calls/store.js";
 import { inferIntent } from "../calls/intent.js";
 import { createTranscriptRecorder, TranscriptStore } from "../calls/transcript.js";
 import { consumeStreamToken } from "./streamTokens.js";
+import type { Booking } from "../calendar/googleCalendar.js";
 
 // AI-ийн ярианы хурд (1 = ElevenLabs-ийн анхдагч). Утсанд 1.15 хурдан ч ойлгомжтой.
 const SPEECH_SPEED = Math.min(1.3, Math.max(0.8, Number(process.env.SPEECH_SPEED) || 1.15));
@@ -141,6 +142,12 @@ type TwilioStreamMessage =
   | { event: "mark"; mark: { name: string } }
   | { event: "stop" };
 
+// Дуудлагын явцад захиалга үүссэн бол дуудлага дууссаны дараа дуудагдана (index.ts тохируулна).
+let afterBookingCall: ((booking: Booking, businessId: string) => void) | null = null;
+export function onBookingCallEnded(handler: (booking: Booking, businessId: string) => void): void {
+  afterBookingCall = handler;
+}
+
 export function handleTwilioMediaStream(ws: WebSocket): void {
   const store = new CallSessionStore();
   let streamSid = "";
@@ -157,6 +164,10 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
   let marksPending = 0;
   let geminiSession: Awaited<ReturnType<typeof createGeminiTurnSession>> | null = null;
   let closed = false;
+  // Энэ дуудлагад үүссэн захиалга (дууссаны дараа сануулахад).
+  let createdBooking: Booking | null = null;
+  let isReminderCall = false;
+  let callBusinessId = DEFAULT_BUSINESS_ID;
   let callerSpokeAt = 0;
   let awaitingReply = false;
   // Дуудлагын зорилгыг дуусахад нь тодорхойлоход: AI юу хариулсан, сул цаг шалгасан эсэх.
@@ -269,6 +280,7 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
       return;
     }
     if (name !== "create_appointment" || typeof booking?.id !== "string" || booking.status !== "confirmed") return;
+    createdBooking = result as Booking;
     try {
       store.update(callId, { bookingId: booking.id, intent: "BOOK_APPOINTMENT" });
     } catch (error) {
@@ -300,6 +312,8 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
       } catch (error) {
         console.error("[twilio] дуудлага хаахад алдаа:", error);
       }
+      // Сануулах дуудлагын үеэр цагаа сольсон бол дахин сануулахгүй.
+      if (createdBooking && !isReminderCall) afterBookingCall?.(createdBooking, callBusinessId);
     }
   }
 
@@ -328,6 +342,8 @@ export function handleTwilioMediaStream(ws: WebSocket): void {
         // Сануулах дуудлагад мэндчилгээ, заавар нь захиалга бүрээр өөр (кэшлэхгүй).
         const params = message.start.customParameters ?? {};
         const reminder = params.direction === "reminder" && params.greeting ? params : null;
+        isReminderCall = params.direction === "reminder";
+        callBusinessId = businessId;
         // Бизнесийн нэрээр мэндэлнэ.
         const greeting = reminder?.greeting ?? business?.greeting ?? greetingFor(business?.name);
         if (!nativeVoice) {

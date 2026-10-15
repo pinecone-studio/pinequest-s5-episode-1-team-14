@@ -2,7 +2,7 @@ import "dotenv/config";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
 import { WebSocketServer } from "ws";
-import { buildMediaStreamTwiml, handleTwilioMediaStream, resolveCallerPhone } from "./telephony/twilio.js";
+import { buildMediaStreamTwiml, handleTwilioMediaStream, onBookingCallEnded, resolveCallerPhone } from "./telephony/twilio.js";
 import { isValidTwilioSignature } from "./telephony/twilioSignature.js";
 import { issueStreamToken } from "./telephony/streamTokens.js";
 import { startSipLine, type SipLine } from "./telephony/sip.js";
@@ -14,8 +14,9 @@ import { cachedUlaw8k } from "./voice/elevenlabs.js";
 import { CallSessionStore } from "./calls/store.js";
 import { TranscriptStore } from "./calls/transcript.js";
 import { BusinessKnowledgeStore } from "./knowledge/store.js";
-import { listBookings } from "./calendar/googleCalendar.js";
+import { listBookings, type Booking } from "./calendar/googleCalendar.js";
 import { reminderGreeting, reminderInstruction } from "./telephony/reminder.js";
+import { afterBookingConfig, isSoonBooking, ReminderStore, reminderConfig, scheduleAfterBooking, startReminderScheduler } from "./telephony/reminderScheduler.js";
 import { AccountStore, belongsTo, DEFAULT_BUSINESS_ID, voiceOptions, createSessionToken, readSessionToken, type Account } from "./accounts/store.js";
 import { createAttemptLimiter } from "./accounts/limiter.js";
 
@@ -30,7 +31,14 @@ const DASHBOARD_ROUTES: Record<string, (businessId: string) => unknown> = {
     return Object.fromEntries(Object.entries(new TranscriptStore().all()).filter(([callId]) => ids.has(callId)));
   },
   "/api/knowledge": (businessId) => new BusinessKnowledgeStore().list({ activeOnly: false }).filter(belongsTo(businessId)),
-  "/api/bookings": async (businessId) => (await listBookings()).filter(belongsTo(businessId)),
+  "/api/bookings": async (businessId) => {
+    // Сануулсан захиалгыг хянах самбарт тэмдэглэнэ.
+    const reminders = new ReminderStore().load();
+    return (await listBookings()).filter(belongsTo(businessId)).map((booking) => {
+      const remindedAt = reminders.get(booking.id)?.calledAt;
+      return remindedAt ? { ...booking, remindedAt } : booking;
+    });
+  },
 };
 
 const accounts = new AccountStore();
@@ -51,6 +59,20 @@ function sendJson(res: import("node:http").ServerResponse, status: number, body:
   res.end(JSON.stringify(body));
 }
 
+// Захиалга сануулах дуудлага (гараар болон автоматаар). HTTP төлөвийн кодыг буцаана.
+async function remindBooking(businessId: string, booking: Booking): Promise<number> {
+  const phone = normalizeMongolianNumber(booking.phone);
+  const line = sipLines.get(businessId);
+  if (!phone) return 422;
+  if (!line) return 503;
+  if (!allowCallback(phone)) return 429;
+  const ok = await line.dial(phone.replace(/^\+976/, ""), {
+    direction: "reminder", greeting: reminderGreeting(booking, new Date(), accounts.businesses().find((item) => item.id === businessId)?.name),
+    instruction: reminderInstruction(booking),
+  });
+  return ok ? 202 : 502;
+}
+
 function hasDashboardToken(req: IncomingMessage): boolean {
   const expected = process.env.DASHBOARD_API_TOKEN;
   if (!expected) return false;
@@ -63,6 +85,20 @@ const sipLines = new Map<string, SipLine>();
 const lineStore = new LineStore();
 // Гадагш дуудлага (буцааж залгах, сануулах) нийтдээ цагт 5: нээлттэй маягтаар их төлбөр гаргуулахаас хамгаална.
 const allowCallback = createCallbackLimiter(Number(process.env.CALLBACK_HOURLY_LIMIT) || 5);
+
+// Удахгүй эхлэх захиалга авсан дуудлага дуусмагц AI сануулж залгана (1 цагийн өмнөх сануулга амжихгүй тул).
+const afterBooking = afterBookingConfig();
+if (afterBooking) {
+  onBookingCallEnded((booking, businessId) => {
+    if (!isSoonBooking(booking, Date.now(), afterBooking.withinMinutes)) return;
+    scheduleAfterBooking(
+      afterBooking.delaySeconds * 1000,
+      () => remindBooking(businessId, booking),
+      () => new ReminderStore().markCalled(booking.id),
+    );
+  });
+  console.log(`[remind] ${afterBooking.withinMinutes} минутын дотор эхлэх захиалгад дуудлагын дараа ${afterBooking.delaySeconds} секундэд сануулна`);
+}
 
 // Twilio /voice-ийг дуудах нийтийн хаяг. Railway домэйнээ өөрөө өгдөг; бусад орчинд PUBLIC_URL-ээр заана.
 function publicBaseUrl(req: IncomingMessage): string {
@@ -292,20 +328,9 @@ const server = createServer(async (req, res) => {
     try {
       const { bookingId } = JSON.parse(await readBody(req)) as { bookingId?: unknown };
       const booking = (await listBookings()).filter(belongsTo(account.businessId)).find((item) => item.id === bookingId);
-      const phone = booking ? normalizeMongolianNumber(booking.phone) : null;
-      if (!booking || !phone) {
-        res.writeHead(booking ? 422 : 404);
-      } else if (!sipLines.has(account.businessId)) {
-        res.writeHead(503);
-      } else if (!allowCallback(phone)) {
-        res.writeHead(429);
-      } else {
-        const ok = await sipLines.get(account.businessId)!.dial(phone.replace(/^\+976/, ""), {
-          direction: "reminder", greeting: reminderGreeting(booking, new Date(), accounts.businesses().find((item) => item.id === account.businessId)?.name),
-          instruction: reminderInstruction(booking),
-        });
-        res.writeHead(ok ? 202 : 502);
-      }
+      const status = booking ? await remindBooking(account.businessId, booking) : 404;
+      if (status === 202 && booking) new ReminderStore().markCalled(booking.id);
+      res.writeHead(status);
     } catch (error) {
       console.error("[remind] алдаа:", error instanceof Error ? error.message : error);
       res.writeHead(400);
@@ -400,4 +425,13 @@ server.listen(PORT, () => {
       if (!sipLines.has(line.businessId)) sipLines.set(line.businessId, started);
     }).catch((error) => console.error(`[sip] …${line.number.slice(-2)} дугаарыг эхлүүлж чадсангүй:`, error instanceof Error ? error.message : error));
   });
+  // Автомат сануулга зөвхөн үндсэн бизнест (календарь одоогоор зөвхөн түүнд).
+  const reminders = reminderConfig();
+  if (reminders) {
+    startReminderScheduler({
+      config: reminders,
+      list: async () => (await listBookings()).filter(belongsTo(DEFAULT_BUSINESS_ID)),
+      call: async (booking) => (await remindBooking(DEFAULT_BUSINESS_ID, booking)) === 202,
+    });
+  }
 });
